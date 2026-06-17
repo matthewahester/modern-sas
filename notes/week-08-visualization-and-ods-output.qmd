@@ -1,0 +1,461 @@
+---
+title: "Week 8 — Visualization and ODS output"
+subtitle: "Report-ready tables and graphics from validated data"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — ODS (Output Delivery System) destinations (HTML/PDF/RTF) — supports sending output to report-ready formats"
+  - "SAS documentation — ODS TRACE and ODS SELECT / ODS EXCLUDE — supports naming and choosing output objects"
+  - "SAS documentation — PROC SGPLOT (HISTOGRAM, VBAR, DENSITY) — supports report-ready statistical graphics"
+  - "SAS documentation — PROC SGPANEL — supports paneled graphics by a classification variable"
+toc: true
+---
+
+## The week question
+
+Last week you built trustworthy summaries — PROC MEANS, PROC FREQ, and PROC UNIVARIATE on the cleaned
+`wellness-program study` — and you read them off plain listings in the SAS log and results window. That gets
+*you* to the answer, but it does not yet get the answer to anyone else in a form they can read at a glance or
+drop into a report. This week's question is the reporting half of the workflow: **once your data are validated
+and your summaries are computed, how do you turn them into report-ready tables and graphics that another person
+can read, trust, and reuse?** The SAS answer has two moving parts that are easy to confuse and worth keeping
+straight from the start: the **Output Delivery System (ODS)**, which decides *where* output goes (an HTML page,
+a PDF, an RTF document) and *which* pieces go there, and the **SG graphics procedures** (PROC SGPLOT,
+PROC SGPANEL), which decide *what the picture looks like*. You will send a histogram of `systolic_bp` to an ODS
+destination, build a bar chart of `goal_met` by `arm`, and — the part that makes this a workflow week, not a
+gallery — keep insisting that a graphic is only ever as trustworthy as the validated dataset behind it.
+
+## Why this matters
+
+A result nobody can read is not a finished result. In a professional SAS analytics workflow the last mile —
+moving from a correct number in your log to a clear table or figure someone else can act on — is where the
+analysis either lands or quietly fails. This week matters for three reasons. First, **ODS is how SAS reporting
+actually works**: every PROC already writes its output *through* ODS, so learning to redirect it (to PDF for a
+report, to RTF for a Word document) and to select just the pieces you want is a direct, reusable skill, not a
+cosmetic one. Second, **a graphic compresses a distribution into something the eye reads in a second** — a
+histogram shows you center, spread, and shape that a table of numbers makes you reconstruct in your head — and
+PROC SGPLOT produces those graphics from the same validated dataset, with no point-and-click. Third, and most
+important for this course's soul, **a figure inherits every flaw of the data under it**: a beautiful histogram
+of a dataset you never validated is a beautiful way to be confidently wrong. So the reporting step is not a
+break from the verification discipline — it is the last place to apply it. You will read the log after every
+graph, check the row count that fed the picture, and say in words what the figure does and does not show.
+
+A boundary specific to this build: **SAS is not executed here.** Every program, log line, output table, and
+figure description on this page is **hand-authored and synthetic** — the `wellness-program study`, seed
+`streaminit(20260824)`. No graphic image is emitted on this page; you get the real, idiomatic SAS code plus a
+careful verbal description of what it would produce. That is the diagnostic fallback, and it is exactly the
+habit you want anyway: **state your load-bearing numbers in prose, never make a reader squint them off a
+picture.**
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Explain what the **Output Delivery System (ODS)** is and distinguish a **destination** (HTML, PDF, RTF —
+  *where* output goes) from an **output object** (a named table or graph a PROC produces — *what* goes there).
+- Open and close an ODS destination correctly (`ods pdf file="…"; … ods pdf close;`) and say why the *close*
+  matters (the file is not finished until you close it).
+- Use **`ods trace on`** to discover the names of the output objects a PROC creates, and **`ods select`** /
+  **`ods exclude`** to keep or drop specific pieces.
+- Write a **PROC SGPLOT HISTOGRAM** of a continuous variable and connect what the picture shows (center,
+  spread, rough shape) back to the matching PROC MEANS summary.
+- Write a **PROC SGPLOT VBAR** (a bar chart) of a categorical outcome by a grouping variable, and read it as a
+  display of counts or proportions — not of the raw rows.
+- Run the **verification step every time**: read the log for NOTE/WARNING/ERROR, confirm the **row count** that
+  fed the graphic, check **NMISS** so dropped missing values do not silently distort the picture, and describe
+  the result responsibly (synthetic, observational, "significant" is not the question a figure answers).
+
+## Core vocabulary
+
+The week's SAS reporting terms, defined plainly. These mirror the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd); keep "destination" and "object" distinct.
+
+- **ODS (Output Delivery System)** — the SAS subsystem that routes every PROC's output to one or more
+  destinations and formats it. You do not "turn on" output; it is always flowing through ODS. You redirect it.
+- **ODS destination** — *where* output goes and in what file format: `ods html` (the default in SAS Studio),
+  `ods pdf`, `ods rtf`, `ods listing` (plain text). You open a destination, run PROCs, then **close** it.
+- **Output object** — a single named table or graph a PROC emits — e.g. PROC MEANS emits an object named
+  `Summary`; PROC TTEST emits several. ODS lets you keep or drop objects by name.
+- **`ods trace on` / `ods trace off`** — writes each output object's **name** and **path** to the log as it is
+  produced, so you can discover what to select. A discovery tool, not a reporting one.
+- **`ods select` / `ods exclude`** — keep only the named objects, or drop the named ones, from the open
+  destinations. The way you stop a PROC from dumping every table when you want one.
+- **PROC SGPLOT** — the workhorse statistical-graphics procedure: one set of axes, with plot statements like
+  **`histogram`**, **`density`**, **`vbar`** (vertical bar), **`scatter`**, **`series`**, **`hbox`**.
+- **PROC SGPANEL** — like SGPLOT but draws a **panel** (a small-multiples grid) split by a classification
+  variable named in a `panelby` statement — e.g. one histogram per `site`.
+- **`ODS GRAPHICS ON/OFF`** — the switch that controls automatic, PROC-generated graphics (the diagnostic plots
+  many statistical PROCs emit). SGPLOT/SGPANEL draw graphics regardless; `ODS GRAPHICS` governs the rest.
+
+## Concept development
+
+### ODS destinations — choosing *where* output goes (and closing it)
+
+Every procedure you have written already sends its output through ODS; in SAS Studio it lands in the default
+**HTML** results by default. Reporting is mostly the act of **adding** a destination so the same output also
+goes to a file you can hand someone. The pattern is always *open → run PROCs → close*:
+
+```sas
+options validvarname=v7;
+libname well "/home/u_rivercity/wellness";   /* permanent library, set in week 3 */
+
+ods pdf file="/home/u_rivercity/reports/bp_summary.pdf" style=journal;
+
+proc means data=well.screenings n mean std min median max maxdec=1;
+    var systolic_bp;
+run;
+
+ods pdf close;   /* the file is NOT finished until you close the destination */
+```
+
+```text
+SAS log (synthetic)
+NOTE: Writing ODS PDF(WEB) output to DISK destination
+      "/home/u_rivercity/reports/bp_summary.pdf", printer "PDF".
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: PROCEDURE MEANS used (Total process time):
+      real time           0.18 seconds
+NOTE: ODS PDF printed 1 page of output to file
+      "/home/u_rivercity/reports/bp_summary.pdf".
+```
+
+**What the log should say, and what to check.** The opening `NOTE: Writing ODS PDF … output to DISK` confirms
+the destination opened and the path is what you intended — read it, because a typo in the folder silently sends
+your report somewhere you will not find it. The `594 observations read` line is your **row-count check**: this
+is the full `screenings` fact table (198 participants × 3 visits + the 2 unscreened never reach `screenings`),
+so the summary is built on the grain you expect. The closing `ODS PDF printed 1 page` line confirms the file
+was finished. **The verification move:** if you forget `ods pdf close;`, SAS holds the file open, the PDF is
+incomplete or locked, and a later step cannot open it — a missing *close* is the single most common ODS bug, so
+make closing the destination as automatic as ending a step with `run;`.
+
+### Naming objects — `ods trace` to discover, `ods select` to choose
+
+A destination by itself takes *everything* a PROC emits. Often you want one piece. To choose, you first need
+the object's **name**, and `ods trace on` writes those names to the log:
+
+```sas
+ods trace on;
+
+proc univariate data=well.screenings;
+    var systolic_bp;
+run;
+
+ods trace off;
+```
+
+```text
+SAS log (synthetic)
+Output Added:
+-------------
+Name:       Moments
+Label:      Moments
+Template:   base.univariate.Moments
+Path:       Univariate.systolic_bp.Moments
+-------------
+Output Added:
+-------------
+Name:       BasicMeasures
+Path:       Univariate.systolic_bp.BasicMeasures
+-------------
+Output Added:
+-------------
+Name:       Quantiles
+Path:       Univariate.systolic_bp.Quantiles
+-------------
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+```
+
+Now you know the names, so you can keep just the quantiles in a report and drop the rest:
+
+```sas
+ods select Quantiles;        /* keep only the Quantiles object */
+proc univariate data=well.screenings;
+    var systolic_bp;
+run;
+ods select all;              /* reset so later PROCs are not silently filtered */
+```
+
+**What to check.** `ods trace` is a **discovery** tool: read the `Name:` lines, do *not* leave trace on in a
+finished program (it clutters the log). After `ods select`, confirm only the object you named appears in the
+output, and **always reset with `ods select all;`** — a forgotten `ods select` quietly suppresses output from
+every later PROC, which looks exactly like a PROC that "produced nothing." That false-empty symptom is a classic
+ODS trap, so the verification habit is: select narrowly, then reset immediately.
+
+### PROC SGPLOT — turning a validated column into a graphic
+
+A table makes you reconstruct a distribution in your head; a histogram shows it. PROC SGPLOT draws one set of
+axes and layers plot statements onto it. For the continuous outcome `systolic_bp`:
+
+```sas
+ods graphics on;
+ods html;   /* the default destination in SAS Studio; named here for clarity */
+
+proc sgplot data=well.screenings;
+    histogram systolic_bp;
+    density   systolic_bp;                 /* overlay a normal-density reference curve */
+    xaxis label="Systolic BP (mm Hg)";
+    yaxis label="Percent of screenings";
+    title  "Distribution of systolic_bp (synthetic; seed streaminit(20260824))";
+run;
+
+title;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: PROCEDURE SGPLOT used (Total process time):
+      real time           0.42 seconds
+NOTE: Listing image output written to SGPlot.png.
+```
+
+**What the figure shows, and what to check.** No image is rendered on this page (SAS is not run here), so read
+the description against the locked summary: the histogram of all **594** screening records is **roughly
+symmetric, centered near the mean 128.4 mm Hg**, with a standard deviation of **14.2**, so most bars fall
+between about **100 and 156** (roughly mean ± 2 SD), tailing to the locked min **96** and max **178**. The
+verification move is to **tie the picture to the numbers**: a histogram that did *not* peak near 128 would mean
+the graphic and your PROC MEANS disagree, which almost always means they ran on different rows. So check the row
+count (`594`) and check **NMISS** for `systolic_bp` — SGPLOT silently drops missing values, and a histogram of
+"the non-missing rows" mislabeled as "all rows" is a quiet error. State the load-bearing numbers in prose (as
+just done) so the reader never has to read them off the bars.
+
+## Worked examples
+
+### Worked example — the wellness-program study: a report-ready histogram to PDF
+
+**The task.** Produce a report-ready PDF that pairs the PROC MEANS summary of `systolic_bp` with a PROC SGPLOT
+histogram of the same variable, so a stakeholder can see the distribution and the numbers together. The data
+are the synthetic `wellness-program study` (`screenings` fact table, **594** rows; synthetic, seed
+`streaminit(20260824)`).
+
+```sas
+options validvarname=v7;
+libname well "/home/u_rivercity/wellness";
+
+ods graphics on;
+ods pdf file="/home/u_rivercity/reports/bp_report.pdf" style=journal;
+
+ods proclabel "Systolic BP — summary";
+proc means data=well.screenings n nmiss mean std min median max maxdec=1;
+    var systolic_bp;
+run;
+
+ods proclabel "Systolic BP — distribution";
+proc sgplot data=well.screenings;
+    histogram systolic_bp;
+    density   systolic_bp;
+    xaxis label="Systolic BP (mm Hg)";
+    yaxis label="Percent of screenings";
+    title  "Systolic BP across 594 screenings (synthetic; seed streaminit(20260824))";
+run;
+title;
+
+ods pdf close;
+```
+
+```text
+SAS log (synthetic)
+NOTE: Writing ODS PDF(WEB) output to DISK destination
+      "/home/u_rivercity/reports/bp_report.pdf", printer "PDF".
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: ODS PDF printed 2 pages of output to file
+      "/home/u_rivercity/reports/bp_report.pdf".
+NOTE: PROCEDURE SGPLOT used (Total process time):
+      real time           0.40 seconds
+```
+
+```text
+Output (synthetic, not executed) — PROC MEANS, systolic_bp
+Analysis Variable : systolic_bp
+   N     NMiss      Mean       Std Dev      Minimum      Median      Maximum
+ 594         0     128.4         14.2         96.0       127.0        178.0
+```
+
+**The verification check.** Both PROCs report `594 observations read` — the same grain, so the table and the
+figure describe the *same* data, which is the whole point of pairing them. `NMiss = 0` confirms there are no
+missing `systolic_bp` values being silently dropped from the histogram, so "594 screenings" is honest for both
+panels. The `ODS PDF printed 2 pages` line confirms the report file was written and closed. Run `proc contents
+data=well.screenings;` once beforehand to confirm `systolic_bp` is **numeric** — a histogram statement on a
+character variable would error, and a numeric column accidentally stored as character would not summarize at
+all.
+
+**The interpretation.** Across the **594** synthetic screening records, systolic blood pressure is centered at
+a mean of **128.4 mm Hg** with a standard deviation of **14.2**, a median of **127** very close to the mean, and
+a range from **96** to **178** — so the histogram is roughly symmetric and bell-ish, with most readings between
+about 100 and 156. Name the workflow move: you **read** the validated `screenings` dataset, **created** a paired
+table-and-figure PDF through ODS, the **log confirmed** the row count and a clean close, and you **checked**
+NMISS and the variable type before trusting the picture. What this figure does **not** show: it is a *marginal*
+distribution pooling all visits and both arms, it says nothing about *why* readings differ, and — because the
+`wellness-program study` is **synthetic and observational** — nothing here is a real health finding or a causal
+claim. The arm comparison that *is* the analytic question waits for week 9's t-test.
+
+### Worked example — transfer: a grouped bar chart of `goal_met` by `arm`
+
+**The task.** In a new display, show how often participants met their step goal in each program arm. The
+outcome `goal_met` is the binary 1/0 variable (1 = met goal); over the **594** screening rows it is
+**246 ones and 348 zeros** (about **41%** met goal). You want a bar chart that compares the *proportion* meeting
+goal across `coaching` vs `usual_care`, not a chart of raw rows. This is still the synthetic study, but a
+different variable and a different graphic.
+
+```sas
+ods graphics on;
+ods html;
+
+proc sgplot data=well.screenings;
+    vbar arm / response=goal_met stat=mean
+               datalabel datalabelattrs=(size=10);
+    yaxis label="Proportion meeting step goal" values=(0 to 0.6 by 0.1);
+    xaxis label="Program arm";
+    title "Goal-met rate by arm (synthetic; seed streaminit(20260824))";
+run;
+title;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: PROCEDURE SGPLOT used (Total process time):
+      real time           0.31 seconds
+NOTE: Listing image output written to SGPlot1.png.
+```
+
+To put the underlying counts on a report page next to the chart, compute them explicitly and read them off a
+table rather than the bars:
+
+```sas
+ods select CrossTabFreqs;
+proc freq data=well.screenings;
+    tables arm * goal_met / nocol nopercent;
+run;
+ods select all;
+```
+
+```text
+Output (synthetic, not executed) — PROC FREQ, arm * goal_met (row percents)
+                 goal_met=0    goal_met=1     Total
+ coaching            156           141          297      (47.5% met)
+ usual_care          192           105          297      (35.4% met)
+ -----------------------------------------------------
+ Total               348           246          594      (41.4% met)
+```
+
+**The verification check.** `594 observations read` is again the full `screenings` grain, and the two arms
+split it **297 / 297** — consistent with the locked design (100 coaching and 100 usual_care participants, each
+with 3 visits, minus the unscreened, nets equal screening counts here). The column totals **348 zeros / 246
+ones** reproduce the locked marginal exactly, so the bar chart and the table agree. **The trap to check:** by
+default `vbar arm;` *alone* would chart the **count of rows** per arm (here 297 vs 297 — a boring, equal-height
+pair); adding `response=goal_met stat=mean` is what turns it into the **proportion meeting goal**, because the
+mean of a 0/1 variable *is* a proportion. Confirm `goal_met` is numeric (not character "1"/"0"), or `stat=mean`
+would fail.
+
+**The interpretation.** Among these synthetic screenings, the goal-met rate is **higher in coaching (≈47.5%)
+than in usual_care (≈35.4%)**, against an overall rate of **41.4%**. Name the workflow move: you **created** a
+proportion bar chart and a backing cross-tabulation, **checked** that the arm split and the marginal counts
+matched the locked study, and **stated the numbers in prose** so the comparison does not depend on eyeballing
+bar heights. What this does **not** show: the gap is **associational, not causal** — the synthetic arms are not
+described as randomized — and a difference in *proportions* is descriptive; the modeled, covariate-adjusted
+version (an **odds ratio of 1.78**, which is *not* a risk ratio) is the week-11 PROC LOGISTIC story, not
+something a bar chart establishes.
+
+## A common mistake
+
+The week's signature trap has two faces, both about confusing the *display* with the *data and destination*
+under it.
+
+- **Screenshotting output instead of producing an accessible graphic** (risk 11). It is tempting to grab a
+  picture of the SAS results window and paste it into a report. Do not. A screenshot is not text, carries no
+  alt text, cannot be re-rendered, and breaks the reproducible chain — someone handed a screenshot cannot rerun
+  it. The professional move is to keep the **PROC SGPLOT code** that *generates* the figure (so it regenerates
+  from the validated dataset) and to caption it with the load-bearing numbers in words. Here that
+  is also why **no image is emitted** and the figure is described in prose (risk 13: a figure shown as *planned*,
+  not pasted) — the code plus the description is the accessible, reproducible surface.
+
+- **Confusing the ODS destination with the output object, and trusting a graphic without checking its data.**
+  Opening `ods pdf` and forgetting `ods pdf close;` leaves a half-written file; leaving an `ods select` in place
+  silently suppresses later PROCs so they look broken; and — the deepest version — drawing a gorgeous histogram
+  of a dataset you never validated. A figure **inherits every flaw of the data beneath it**: an unchecked row
+  count, a few hundred silently-dropped missing values, a character-vs-numeric mix-up, an un-cleaned duplicate.
+  The fix is the course's recurring discipline applied to reporting: **read the log, confirm the row count that
+  fed the picture, check NMISS, confirm the variable's type, then trust the graphic — in that order.** A
+  rendered figure is not evidence the data behind it are right.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission.
+
+1. In one sentence each, distinguish an ODS **destination** from an ODS **output object**, and give one example
+   of each from this week.
+2. You open `ods pdf file="report.pdf";`, run two PROCs, and the PDF will not open afterward. What single line
+   did you most likely forget, and why does it matter?
+3. You want only the quantiles table from PROC UNIVARIATE in your report. Which statement discovers the object's
+   name, and which statement keeps only that object? What must you run afterward, and what breaks if you forget?
+4. Sketch (or describe) what `histogram systolic_bp;` should look like given the locked summary (mean 128.4, SD
+   14.2, min 96, max 178). Where is the peak, and roughly where do most bars fall?
+5. A classmate writes `proc sgplot; vbar arm; run;` to compare goal-met rates by arm and gets two equal-height
+   bars. What did the chart actually display, and what option turns it into the proportion meeting goal?
+6. Before trusting any figure on the `screenings` data, name the four checks this week insists on (think: log,
+   rows, missing, type). Why does a "beautiful figure" not satisfy any of them?
+7. A bar chart shows coaching meeting goal more often than usual_care. State one thing this *does* show and two
+   things it does **not** (think: associational vs causal, descriptive proportion vs modeled odds ratio).
+
+## Reading and source pointer
+
+For this week's procedures, point yourself to the relevant **SAS documentation** pages: the **ODS (Output
+Delivery System)** documentation on opening, closing, and styling destinations (HTML, PDF, RTF); the pages on
+**`ODS TRACE`** and **`ODS SELECT` / `ODS EXCLUDE`** for naming and choosing output objects; and the
+**PROC SGPLOT** documentation for the `histogram`, `density`, and `vbar` statements, plus **PROC SGPANEL** for
+paneled small-multiples by a classification variable. Read these as a *reading pointer* — find the statement,
+the option, and the usage notes — not as something to copy. "Learning to check the documentation" is itself a
+course skill: the SAS docs are the authoritative reference for exact option syntax and defaults.
+
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc. (The
+SAS documentation is proprietary, Tier 3 — linked and cited here in the course's own words, never reproduced.)
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and **every numeric value on this page are hand-authored,
+synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The course **SAS
+execution/output gate is BLOCKED**; a rendered code block, a typed listing, or the absence of an emitted figure
+is *not* evidence that the code runs or that the numbers are right. The load-bearing values here — the
+`screenings` row count **594**; the `systolic_bp` summary **mean 128.4, SD 14.2, min 96, median 127, max 178**;
+the `goal_met` marginal **246 ones / 348 zeros (≈41.4%)** with the per-arm split (coaching ≈47.5% vs usual_care
+≈35.4%); and the planned-but-not-emitted SGPLOT histogram and bar chart — are the locked synthetic
+`wellness-program study` figures (seed `streaminit(20260824)`), drafted "as if run" for this draft site and
+checked only for internal and narrative consistency. The study is **synthetic and observational** — not real
+health data, and not causal. The week-08 figure is **deferred** to a future runtime-enabled (SAS) pass; no
+image is rendered. Do not treat any value or graphic here as a confirmed reference until the human/SAS-run
+sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we move from *describing* the distribution to *comparing groups* with formal statistical procedures.
+Week 9 runs **PROC TTEST** of `systolic_bp` by `arm` (coaching 125.9 vs usual_care 130.8; difference −4.9, 95%
+CI (−7.2, −2.6); pooled $t = -4.27$, df 196, $p < .0001$) and **PROC GLM / ANOVA** of `systolic_bp` by `site`
+(means 126.1 / 128.9 / 130.6; $F(2,195) = 5.10$, $p = 0.0071$) — and it pairs each test with the boxplot
+display this week's graphics skills set up. It also presses the interpretation discipline harder: stating
+assumptions before reading a p-value, and remembering that "statistically significant" is not "practically
+important," and that an arm difference in observational data is associational, not causal.
+
+## See also
+
+- Previous week: [Week 7 — Summaries, tables (and midterm)](week-07-summaries-tables-and-midterm.qmd) — the
+  PROC MEANS / FREQ / UNIVARIATE summaries this week turns into report-ready tables and figures.
+- Next week: [Week 9 — t-tests, ANOVA & group comparisons](week-09-ttests-anova-group-comparisons.qmd) — from
+  describing a distribution to comparing groups, with boxplots built on this week's SGPLOT skills.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — ODS destination vs output object; SGPLOT vs
+  SGPANEL; the read-the-log, check-the-rows discipline.
+- [PROC reference](../resources/proc-reference.qmd) — PROC SGPLOT, PROC SGPANEL, and the ODS statements side by
+  side with the summary and statistical PROCs.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR,
+  confirming row counts, and checking NMISS before you trust an output or a figure.

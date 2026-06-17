@@ -1,0 +1,292 @@
+---
+title: "Lab 10 — Linear regression and diagnostics"
+subtitle: "Fitting systolic_bp on age and BMI, and reading the diagnostics"
+page_mode: software_lab_week
+week_contract: software_note_lab
+source_mode: source-informed
+verified: false
+toc: true
+---
+
+> **Purpose.** This lab is the hands-on companion to
+> [Week 10 — Linear regression](../notes/week-10-linear-regression.qmd). The note develops PROC REG — fitting a
+> line, reading the slopes and fit statistics, and checking the residuals before you trust the fit. Here you
+> do that workflow yourself on the wellness-program study: build the baseline slice, run the regression,
+> verify the row count and the variable types from the log, read the parameter estimates, and diagnose the
+> residuals. The data are **synthetic; seed set, `streaminit(20260824)`**, and the analysis is
+> **observational**, so every slope is an association, not a cause. Nothing here was run — all SAS code, logs,
+> and output are hand-authored and synthetic.
+
+## The idea
+
+A linear regression asks how a continuous outcome changes as a numeric input changes, and how well a straight
+line summarizes the cloud of points. For the RiverCity wellness-program study the outcome is baseline
+`systolic_bp` and the two numeric predictors are `age` and `baseline_bmi`. The fitted ordinary-least-squares
+model has the form
+
+$$
+\widehat{\text{systolic\_bp}} = b_0 + b_1\,\text{age} + b_2\,\text{baseline\_bmi},
+$$
+
+and PROC REG estimates the three coefficients, reports fit statistics ($R^2$, Root MSE, the overall $F$), and
+— with `ODS GRAPHICS ON;` — emits a diagnostics panel. But the workflow this lab teaches is not "run REG and
+read the slope." It is **fit the model, read the log, confirm the row count and the predictor types went in as
+numbers, read the estimates and the fit, and then check the residuals** — the step beginners skip. A modest
+$R^2$ you understood beats a big one you did not earn.
+
+## Goal
+
+Build the visit-1 baseline slice (one row per participant, **n = 198**), fit `systolic_bp = age baseline_bmi`
+with PROC REG, confirm from the log that **198 observations read = 198 used** (no rows dropped for
+missingness) and that the predictors are numeric, read the locked parameter estimates (intercept **86.5**,
+`age` slope **0.45**, `baseline_bmi` slope **1.02**) and fit statistics ($R^2 = \mathbf{0.214}$, RMSE
+$= \mathbf{12.6}$), then output and diagnose the residuals. Finish by confirming the synthetic result matches
+the companion week note exactly.
+
+## Setup
+
+Open your provisioned SAS Studio session (SAS OnDemand for Academics or Viya for Learners — see
+[SAS access & setup](../resources/sas-access-setup.qmd); note the access caveat there). Assign a `libname` for
+the permanent study data and set `options` you rely on. The regression runs on the **visit-1 baseline slice**:
+one row per participant, taken from the screening table at `visit_num = 1`, so each person contributes exactly
+one outcome. Fix the seed with `call streaminit(20260824)` — there is no randomness in the fit itself, but the
+convention keeps every lab reproducible and is required wherever the study's synthetic data are regenerated.
+
+```sas
+options validvarname=v7 nodate nonumber;
+
+libname riverc "/home/youruser/rivercity";   /* permanent study library */
+
+/* the visit-1 baseline slice: one row per participant (n = 198 screened) */
+data work.baseline;
+    set riverc.analysis_ready;     /* the cleaned, joined study table */
+    where visit_num = 1;           /* keep the first screening only    */
+    call streaminit(20260824);     /* reproducibility convention       */
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 198 observations read from the data set RIVERC.ANALYSIS_READY
+      where visit_num=1.
+NOTE: The data set WORK.BASELINE has 198 observations and 11 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.04 seconds
+```
+
+**What the log should say, and what to CHECK.** The line `WORK.BASELINE has 198 observations` is the one to
+read: the baseline slice should hold exactly the **198** participants who were screened (the 2 enrolled but
+unscreened participants have no visit-1 row, so they do not appear). The workflow move is *create the slice,
+then confirm its row count before you model it* — if this said 200 or 596 you would stop and find out why,
+because the regression is only as trustworthy as the table that feeds it. No WARNING and no ERROR, so the
+`where` filtered cleanly.
+
+## Steps
+
+### Step 1 — confirm the analysis table: row count, types, and NMISS
+
+Before fitting anything, verify the table you are about to model. PROC REG needs **numeric** predictors, drops
+rows with missing values silently, and is only as good as the slice it reads — so the first move is always to
+check the row count, the variable types, and the missing-value counts. The data are **synthetic; seed set,
+`streaminit(20260824)`**.
+
+```sas
+proc contents data=work.baseline varnum;
+run;
+
+proc means data=work.baseline n nmiss min mean max maxdec=2;
+    var systolic_bp age baseline_bmi;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+                       The CONTENTS Procedure
+   #    Variable        Type      Len
+   1    participant_id  Num         8
+   4    age             Num         8
+   7    baseline_bmi    Num         8
+   9    systolic_bp     Num         8
+   ...
+
+                         The MEANS Procedure
+Variable        N    NMiss      Minimum       Mean      Maximum
+-------------------------------------------------------------------
+systolic_bp   198        0        96.00     128.40       178.00
+age           198        0        24.00      46.30        71.00
+baseline_bmi  198        0        18.40      27.80        41.20
+-------------------------------------------------------------------
+```
+
+**CHECK.** Three things, all passing. (1) **Types:** `systolic_bp`, `age`, and `baseline_bmi` all print as
+`Num` in PROC CONTENTS — REG will accept them; had `age` been character (a number read as text), REG would
+have thrown `ERROR: Variable age ... does not match type prescribed for this list`. (2) **Row count:**
+`N = 198` for all three variables, matching the baseline slice. (3) **Missingness:** `NMiss = 0` everywhere,
+so the fit will use all 198 rows and `Observations Used` will equal `Observations Read`. The `systolic_bp`
+mean prints as **128.40**, the locked overall mean — a sanity anchor that the right column is in the table.
+This is the verification discipline: confirm types and NMISS *before* you trust the model, not after.
+
+### Step 2 — fit the regression and read the log
+
+Now fit the model. Turn on `ODS GRAPHICS` so the diagnostics panel is produced (you read it in Step 3), name
+the response on the left of the `MODEL` `=` and the two predictors on the right, and `output` the predicted
+values and residuals to a dataset so you can diagnose them numerically. End the PROC with `run; quit;`.
+
+```sas
+ods graphics on;
+
+proc reg data=work.baseline
+         plots(only)=(residualbypredicted qqplot);
+    model systolic_bp = age baseline_bmi;
+    output out=work.reg_diag predicted=yhat residual=resid;
+run;
+quit;
+
+ods graphics off;
+```
+
+```text
+SAS log (synthetic)
+NOTE: PROCEDURE REG used (Total process time):
+      real time           0.33 seconds
+NOTE: There were 198 observations read from the data set WORK.BASELINE.
+NOTE: 198 observations were used in the analysis.
+NOTE: The data set WORK.REG_DIAG has 198 observations and 13 variables.
+NOTE: ODS Graphics output written to the HTML destination.
+```
+
+**CHECK.** Read the two load-bearing log lines together: `198 observations read` and `198 observations were
+used` — they **match**. That equality is the silent-drop check: REG fits only complete cases, so if a
+predictor had missing values, "used" would fall below "read" and you would be modeling a smaller, possibly
+non-representative subset than you thought. Here both are 198, so the fit used the full baseline slice. The
+`WORK.REG_DIAG has 198 observations` line confirms the output dataset has one residual per modeled row — you
+will verify that count again in Step 3. No WARNING, no ERROR: the `MODEL` statement parsed and the predictors
+were accepted as numeric. The workflow move: *fit, then read read-vs-used off the log before reading a single
+coefficient.*
+
+### Step 3 — read the estimates, fit statistics, and residual diagnostics
+
+With the row count confirmed, read the output. PROC REG prints an analysis-of-variance table, then the
+parameter estimates, then the fit statistics; the diagnostics panel is the ODS graphic. Because SAS is **not
+run** here, no panel image is emitted — the numeric residual summary below is the fallback the
+visual plan calls for, and the panel's shape is described in words.
+
+```text
+Output (synthetic, not executed)
+
+Number of Observations Read         198
+Number of Observations Used         198
+
+                          Analysis of Variance
+                                Sum of           Mean
+Source             DF         Squares         Square    F Value    Pr > F
+Model               2         8512.4         4256.2      26.51     <.0001
+Error             195        31309.6          160.6
+Corrected Total   197        39822.0
+
+Root MSE           12.60000     R-Square     0.2140
+Dependent Mean    128.40000     Adj R-Sq     0.2060
+
+                     Parameter Estimates
+                  Parameter    Standard
+Variable     DF    Estimate       Error   t Value   Pr > |t|
+Intercept     1    86.50000     7.81200     11.07     <.0001
+age           1     0.45000     0.11800      3.81     0.0002
+baseline_bmi  1     1.02000     0.21400      4.77     <.0001
+```
+
+The fitted line is
+$\widehat{\text{systolic\_bp}} = 86.5 + 0.45\,\text{age} + 1.02\,\text{baseline\_bmi}$. Each additional year of
+`age` is associated with about $0.45$ mm Hg higher systolic pressure, and each additional BMI point with about
+$1.02$ mm Hg higher, **holding the other fixed**, in this synthetic sample. Both slopes are "significant"
+($p = 0.0002$ and $p < .0001$) and the overall model is too ($F = 26.51$, $p < .0001$) — but $R^2 = 0.214$
+says the model explains only about $21\%$ of the spread, and RMSE $= 12.6$ mm Hg says individual predictions
+are still off by a lot. Now diagnose the residuals before you believe any of it.
+
+```sas
+/* numeric backstop for the (non-emitted) diagnostics panel */
+proc means data=work.reg_diag n nmiss mean std min max maxdec=4;
+    var resid;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+           The MEANS Procedure
+Analysis Variable : resid Residual
+  N    NMiss        Mean      Std Dev      Minimum      Maximum
+-------------------------------------------------------------------
+198        0      0.0000      12.5680     -31.4000      33.8000
+-------------------------------------------------------------------
+```
+
+**CHECK.** The residual `Mean = 0.0000` is mechanical — least squares forces it for *every* fit, so it
+confirms the arithmetic, not the assumptions. The diagnostics you actually trust come from the *shapes* in the
+panel: the synthetic residual-vs-predicted scatter would show a **patternless cloud around zero with no funnel
+or curve** (supporting linearity and constant variance), and the normal QQ plot would show **points close to
+the straight reference line** (supporting approximate normality). The residual `Std Dev = 12.568` echoes the
+Root MSE of $12.6$ — a consistency check that the output dataset and the fit agree. And `N = 198`,
+`NMiss = 0`: every modeled row has a residual, so the diagnostics dataset lines up exactly with the fit. The
+discipline this whole lab is built around: *never report $R^2$ and the slopes without first looking at the
+residuals.*
+
+## Verify
+
+Confirm the synthetic result matches the companion
+[Week 10 — Linear regression](../notes/week-10-linear-regression.qmd) note exactly, then run the workflow
+checks one more time:
+
+- **Numbers match the note.** Intercept $86.5$, `age` slope $0.45$, `baseline_bmi` slope $1.02$,
+  $R^2 = 0.214$, Adj $R^2 = 0.206$, Root MSE $= 12.6$, overall $F = 26.51$ ($p < .0001$), slope $p$-values
+  $0.0002$ and $<.0001$, and $n = 198$ — every load-bearing value here is the locked figure from the week
+  note. If any of yours differs, you fed REG a different slice (re-check the `where visit_num = 1` filter and
+  the row count).
+- **Read equals used.** `Number of Observations Read = 198` and `Used = 198` agree, so REG dropped no rows for
+  missing predictors — the verification that decides whether the fit used the table you intended.
+- **Types and NMISS.** PROC CONTENTS shows `age`, `baseline_bmi`, and `systolic_bp` all `Num`; PROC MEANS
+  shows `NMiss = 0` on all three. Numeric predictors are why REG accepted them; zero missing is why the count
+  held.
+- **Residuals before the fit number.** The residual mean is $0.0000$ (mechanical), the residual SD $12.568$
+  echoes RMSE $12.6$, and the (described) panel shows a patternless cloud and a near-straight QQ plot — so the
+  linear form is supported and the modest $R^2 = 0.214$ is an *honest* result, not a failed one.
+- **The two standing limits.** The wellness data are **observational**, so each slope is an **association**,
+  not a causal effect — the model cannot say that changing `age` or `baseline_bmi` would change blood
+  pressure. And "significant" means a slope is distinguishable from zero, **not** that it is large: read the
+  slope's size and the $R^2$ for that.
+
+If all five pass, you have not just produced a regression — you have produced one another person could rerun
+and verify, which is the whole point of the course.
+
+## AI use note
+
+| Tool | Purpose | Verification |
+|------|---------|--------------|
+| which assistant you used, with approximate date or version | what you used it for (e.g. explaining the `plots(only)=` option, debugging the `output out=` statement, or interpreting Adj $R^2$ vs $R^2$) | how you checked it yourself: confirmed `Read = Used = 198` on the log, matched the intercept/slopes/$R^2$/RMSE against the Week 10 note, verified the predictors are `Num` in PROC CONTENTS, and checked the residual SD against the Root MSE |
+
+Verification is the load-bearing line: an AI can write the PROC REG step or explain a diagnostics option, but
+*you* confirm the row count read equals used, the numbers match the locked note, the predictors are numeric,
+and the residuals were actually checked — and that you can say why a modest $R^2 = 0.214$ on observational data
+is an association, not a cause.
+
+## See also
+
+- Companion note: [Week 10 — Linear regression](../notes/week-10-linear-regression.qmd) — fitting, reading,
+  and diagnosing the linear model.
+- Previous note: [Week 9 — t-tests, ANOVA & group comparisons](../notes/week-09-ttests-anova-group-comparisons.qmd)
+  — the categorical-predictor side of the same linear model.
+- Next note: [Week 11 — Logistic regression & categorical outcomes](../notes/week-11-logistic-regression-categorical.qmd)
+  — regression when the outcome is binary, and odds ratios.
+- [Lab 6 — PROC SQL joins & relationship checks](lab-06-proc-sql-joins-and-relationship-checks.qmd) — where the
+  joined analysis table comes from.
+- [PROC reference](../resources/proc-reference.qmd) — REG, GLM, TTEST, LOGISTIC side by side.
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR and
+  checking counts, types, and NMISS.
+- [SAS access & setup](../resources/sas-access-setup.qmd) — getting a provisioned SAS account and organizing
+  your project.
+
+*The graded deliverable, its rubric, and due date live in Blackboard (the LMS) — this page is study and
+practice only. All SAS code, logs, and output here are hand-authored and synthetic; nothing was run, every
+number is `verified: false`, and the SAS execution/output gate is BLOCKED pending the human/SAS-run sign-off
+in the course's private notation and verification ledger §5.*

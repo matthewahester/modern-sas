@@ -1,0 +1,750 @@
+---
+title: "PROC reference"
+subtitle: "The course procedures side by side — what each is for and how to read its output"
+page-type: reference
+toc: true
+verified: false
+---
+
+The course works through a sequence of SAS procedures — from `PROC PRINT` and `PROC CONTENTS`, which just
+*look* at a dataset, up to `PROC LOGISTIC`, which models a 0/1 outcome. This page lays them out side by side as
+a **study aid**: for each procedure, what it is for, when to reach for it, the key statements and options
+(named in the course's own words), and — the part that matters most for this course — **how to read its output
+and what to verify**. It is a map of *which procedure answers which question*, not a syntax dump and **not** a
+substitute for the SAS documentation. Keep it open beside the week notes and labs.
+
+::: {.callout-important}
+**SAS is shown here, not executed.** Every SAS snippet below appears as static, syntax-highlighted ` ```sas `
+text, and every log line or output table is a typed **synthetic** listing — SAS is proprietary and is **not
+run** in this build. A rendered listing is not evidence the code runs or that the numbers are right. All
+numbers are the locked values of the synthetic, observational **wellness-program study** (seed
+`streaminit(20260824)`); they are **hand-authored** and the page carries `verified: false`.
+:::
+
+::: {.callout-note}
+**This is the course's own synthesis, not the SAS reference.** For authoritative syntax, every option name, and
+the complete statement list, go to the official SAS documentation — each section below points you to the right
+page. "Learning to check the documentation" is itself a course skill; this page tells you *which* page to open
+and *what to look for*, in plain words, but never reproduces SAS-doc prose, examples, tables, or figures.
+:::
+
+## How to use this page
+
+Reach for a procedure by the **question** you are asking, not by its name. The course splits its procedures
+into three jobs, and the workflow moves through them in order:
+
+- **Look and validate** — `PROC PRINT`, `PROC CONTENTS`, `PROC FREQ`, `PROC MEANS`, `PROC UNIVARIATE`. Read
+  what you have, confirm the types and counts, check the distributions. Do this *before* you model anything.
+- **Assemble and shape** — `PROC SQL`, `PROC SORT`, `PROC TRANSPOSE`. Query, join, sort, and reshape the
+  tables into one analysis-ready dataset, **checking the row count every time**.
+- **Analyze and report** — `PROC SGPLOT`, `PROC TTEST`, `PROC ANOVA`/`PROC GLM`, `PROC REG`, `PROC LOGISTIC`,
+  `PROC SURVEYSELECT`, and the **ODS** destinations. Compare groups, fit models, simulate, and produce
+  report-ready output — then say what the result does and does **not** show.
+
+Two habits apply to **every** procedure on this page, no matter the job:
+
+1. **Read the log, not just the output.** The log is SAS's primary output. After every step, confirm the
+   `NOTE:` lines (how many observations were read, how many created), and treat any `WARNING:` or `ERROR:` as a
+   stop-and-fix. A clean output window over a `WARNING`-laced log is a trap.
+2. **Verify before you trust.** Check the row count (especially after a join), confirm variable types
+   (character vs numeric is load-bearing), and look at `NMISS` for missing values. The recurring test is
+   *"could someone else rerun and verify this?"*
+
+The recurring data are the **wellness-program study** ("RiverCity Wellness"): **210** raw participant rows
+cleaned to **200** unique participants in `participants`, joined by `participant_id` to **594** screening rows
+in `screenings`. It is **synthetic; seed `streaminit(20260824)`**, **observational**, and **not real health
+data** — never read any number below as a real health finding.
+
+## Quick-pick table — which procedure for which question
+
+A one-screen index. The detailed sections follow in workflow order.
+
+| Procedure | One-line job | Reach for it when … | Verify |
+|-----------|--------------|---------------------|--------|
+| `PROC PRINT` | List the actual rows | You want to *see* observations, not summaries | Row order; that values look sane |
+| `PROC CONTENTS` | Describe a dataset's structure | You need variable **types**, lengths, formats, obs count | Type of each key/numeric variable |
+| `PROC FREQ` | Count categories | A variable is categorical (`sex`, `arm`, `site`) | Counts sum to the table total |
+| `PROC MEANS` | Summarise numerics | You want N, mean, SD, min/max of a numeric | `N` vs `NMISS`; ranges plausible |
+| `PROC UNIVARIATE` | Inspect a distribution | You need quantiles, normality, outlier checks | Median vs mean; extreme values |
+| `PROC SQL` | Query / join tables | You filter, group, or **join** tables | Row count after the join (594 vs 596) |
+| `PROC SORT` | Order rows by a key | A `BY` step or a `MERGE` needs sorted input | No unintended `nodupkey` drops |
+| `PROC TRANSPOSE` | Reshape wide ↔ long | A procedure needs the other layout | Row/column count after reshape |
+| `PROC SGPLOT` | Plot one analysis graph | You need a histogram, boxplot, or scatter | Axis ranges; the graph matches the table |
+| `PROC TTEST` | Compare two group means | Two groups (`arm`: coaching vs usual_care) | Equal-variance row; assumptions |
+| `PROC ANOVA` / `GLM` | Compare 3+ group means | Three+ groups (`site`: North/Central/South) | The `F` test, then *which* means differ |
+| `PROC REG` | Linear regression | A numeric outcome on numeric predictors | $R^2$, RMSE, residual checks |
+| `PROC LOGISTIC` | Logistic regression | A 0/1 outcome (`goal_met`) | **Which level is modeled**; OR ≠ RR |
+| `PROC TRANSPOSE` (again) | — | (see above) | — |
+| `PROC SURVEYSELECT` | Random samples / bootstrap | You need a sample or resamples | `seed=20260824`; sample size |
+| **ODS** (destination) | Route output to HTML/PDF/RTF | You build a report or select an object | The named output object appears |
+
+## Look and validate
+
+### `PROC PRINT` — list the rows
+
+**What it is for.** The simplest procedure: it prints the actual observations of a dataset, so you can *see*
+the data rather than a summary. It is your first reality check after a DATA step or an import.
+
+**When to use it.** Right after you create or import a dataset — to confirm the variables landed in the right
+columns, dates display as dates (not raw numbers), and nothing is obviously wrong. Use `obs=` to print only the
+first few rows of a large table.
+
+**Key statements/options (in our own words).** `var` chooses which variables to print and in what order;
+`where` filters to a subset of rows; the dataset option `(obs=10)` caps how many rows print. See the SAS
+documentation — [PROC PRINT](https://documentation.sas.com/) (the `VAR` and `WHERE` statements).
+
+```sas
+proc print data=wp.participants(obs=5);
+  var participant_id sex arm enroll_date baseline_bmi;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Obs   participant_id   sex   arm          enroll_date   baseline_bmi
+  ----  --------------   ---   ----------   -----------   ------------
+    1            10001   F     coaching     24AUG2026             27.4
+    2            10002   M     usual_care   24AUG2026             31.0
+    3            10003   F     coaching     25AUG2026             24.8
+    4            10004   M     usual_care   26AUG2026             29.1
+    5            10005   F     coaching     26AUG2026             22.6
+```
+
+**How to read it / verify.** `enroll_date` displays as a real SAS date (`24AUG2026`), which confirms the
+`MMDDYY10.` informat from week 5 worked — if it printed as `20690`, the date is still a raw number and the
+format is missing. The workflow move is *look before you summarise*: PROC PRINT shows the data, it does not
+check it, so pair it with `PROC CONTENTS` for types and `PROC FREQ`/`PROC MEANS` for counts. (Tied to
+[Week 3 — libraries, datasets, variables, formats](../notes/week-03-libraries-datasets-variables-formats.qmd).)
+
+### `PROC CONTENTS` — describe the structure
+
+**What it is for.** It reports a dataset's *structure* — the number of observations and variables, and for each
+variable its **type** (character or numeric), length, label, format, and informat. It does not show data
+values; it shows the metadata.
+
+**When to use it.** Before any join or any numeric procedure. The single most common silent bug in the course —
+a join that returns 0 rows, or `PROC MEANS` refusing a "number" — traces to a variable's **type**, and
+`PROC CONTENTS` is where you confirm it.
+
+**Key statements/options.** Run it bare for the full description; `varnum` orders variables by position rather
+than alphabetically. See [PROC CONTENTS](https://documentation.sas.com/) (in PROC DATASETS).
+
+```sas
+proc contents data=wp.participants varnum;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Data Set Name: WP.PARTICIPANTS      Observations: 200
+                                      Variables:      8
+
+  #  Variable         Type   Len   Format
+  -  --------------   ----   ---   ----------
+  1  participant_id   Num      8
+  2  age              Num      8
+  3  sex              Char     1
+  4  site             Char     7
+  5  arm              Char    10
+  6  enroll_date      Num      8   MMDDYY10.
+  7  baseline_bmi     Num      8
+  8  region           Char    10
+```
+
+**How to read it / verify.** Confirm **200 observations** (the cleaned count from week 5) and that
+`participant_id` is **Num** — if it were `Char`, the join to `screenings` (whose key is numeric) would match
+nothing. Note `enroll_date` is **Num** with an `MMDDYY10.` format: a date is a number displayed with a date
+format. The workflow move is *confirm types before you trust a join or a mean*. (See
+[Week 5 — importing, cleaning, validating](../notes/week-05-importing-cleaning-validating.qmd).)
+
+### `PROC FREQ` — count categories
+
+**What it is for.** Frequency counts (and cross-tabulations) of **categorical** variables — how many F vs M,
+how many in each `arm`, each `site`.
+
+**When to use it.** To validate a cleaned categorical variable against the count you expect, and to check for
+unexpected levels (a stray blank, a misspelled category). Use a two-way table (`a*b`) to cross categories.
+
+**Key statements/options.** `tables` lists the variables (or `a*b` for a cross-tab); `/ nocum` drops the
+cumulative columns; `/ missing` makes missing a counted level (so you *see* the blanks). See
+[PROC FREQ](https://documentation.sas.com/) (the `TABLES` statement).
+
+```sas
+proc freq data=wp.participants;
+  tables sex arm site / nocum;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  sex   Frequency   Percent
+  ---   ---------   -------
+  F           104      52.0
+  M            96      48.0
+
+  arm          Frequency   Percent
+  ----------   ---------   -------
+  coaching           100      50.0
+  usual_care         100      50.0
+
+  site      Frequency   Percent
+  -------   ---------   -------
+  Central         66      33.0
+  North           70      35.0
+  South           64      32.0
+```
+
+**How to read it / verify.** Each table's counts must sum to **200**: $104 + 96 = 200$; $100 + 100 = 200$;
+$66 + 70 + 64 = 200$. These are the **locked cleaned frequencies**. The workflow move is *confirm the parts add
+to the whole*; if `sex` summed to 188, you would suspect the 12 blank-`sex` rows were dropped — add `/ missing`
+to see them as a counted level rather than silently excluded.
+
+### `PROC MEANS` — summarise numeric variables
+
+**What it is for.** Descriptive statistics for **numeric** variables — by default N, Mean, Std Dev, Min, Max —
+overall or by group (with a `CLASS` statement). The headline summary procedure of the course.
+
+**When to use it.** To describe a continuous outcome like `systolic_bp` or `steps_k`, and to compare group
+means informally before a formal test. Critically, **the mean of a 0/1 variable is a proportion**, so
+`mean(goal_met)` reads as the goal-met rate.
+
+**Key statements/options.** Request specific statistics by name (`n nmiss mean std min median max`); `class`
+gives by-group summaries; `var` names the analysis variables. Always request **`nmiss`** so missing values are
+visible. See [PROC MEANS](https://documentation.sas.com/) (the statistic keywords and `CLASS`).
+
+```sas
+proc means data=wp.screenings n nmiss mean std min median max;
+  var systolic_bp steps_k goal_met;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Variable      N     NMiss     Mean      Std Dev      Min    Median      Max
+  -----------  ----   -----   --------   ---------   ------   -------   ------
+  systolic_bp   594       0    128.40       14.20    96.00    127.00   178.00
+  steps_k       594       0      7.45        2.60     0.40      7.30    18.20
+  goal_met      594       0      0.41        0.49     0.00      0.00     1.00
+```
+
+**How to read it / verify.** Confirm **N = 594** (the screening-row total) and **NMiss = 0** before trusting
+the mean — `MEAN` silently skips missing values, so an unchecked `NMiss` can quietly bias a comparison. The
+`systolic_bp` mean **128.4** (SD **14.2**) and `steps_k` mean **7.45** are the locked summaries; the
+`goal_met` mean **0.41** is the **proportion** who met goal (≈ 41%), *not* an average on a 1–100 scale. The
+workflow move is *N and NMiss first, then the statistic*. (See
+[Week 7 — summaries, tables, and the midterm](../notes/week-07-summaries-tables-and-midterm.qmd).)
+
+### `PROC UNIVARIATE` — inspect a distribution
+
+**What it is for.** A deeper distributional look at a single numeric variable — full quantiles, skewness, a
+normality assessment, and extreme-value listings. Where `PROC MEANS` gives the headline summary,
+`PROC UNIVARIATE` shows the **shape**.
+
+**When to use it.** When you need to *check an assumption* (is `systolic_bp` roughly symmetric before a
+t-test?) or hunt outliers and impossible values (the `baseline_bmi = 0` problem from week 5).
+
+**Key statements/options.** Bare it for the full picture; `var` names the variable; an `output` statement saves
+quantiles to a dataset. See [PROC UNIVARIATE](https://documentation.sas.com/) (quantiles and extreme
+observations).
+
+```sas
+proc univariate data=wp.screenings;
+  var systolic_bp;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Quantile        Estimate
+  -------------   --------
+  100% Max          178.0
+  75% Q3            137.0
+  50% Median        127.0
+  25% Q1            119.0
+  0%  Min            96.0
+
+  Mean 128.40   Std 14.20   N 594
+```
+
+**How to read it / verify.** Median **127** sits just below the mean **128.4**, a mild right skew consistent
+with a few high readings (max **178**) — useful context before a t-test that assumes approximate normality.
+Check the **min (96)** and **max (178)** are physiologically plausible: a min of 0 would flag an
+unclean/impossible value to fix before analysis. The workflow move is *check the shape and the extremes before
+you model the mean*.
+
+## Assemble and shape
+
+### `PROC SQL` — query and join
+
+**What it is for.** Structured Query Language inside SAS: select columns, filter rows, group and summarise, and
+**join** tables — often in one statement, with no pre-sorting required. The course's main tool for assembling
+an analysis dataset from the two study tables.
+
+**When to use it.** Whenever you filter, group-summarise, or combine tables. Joining `participants` to
+`screenings` on `participant_id` is the central example — and the place the course's **row-count discipline**
+lives.
+
+**Key statements/options.** A `select` query with `where` (filter rows), `group by` + a summary function
+(`count(*)`, `mean(x)`), and `having` (filter groups); `inner join` vs `left join` with an `on` condition; the
+block ends with **`quit;`** (PROC SQL is interactive), not `run;`. See [PROC SQL](https://documentation.sas.com/)
+(the `SELECT` statement and the join syntax).
+
+```sas
+proc sql;
+  create table wp.inner_joined as
+  select p.participant_id, p.arm, s.visit_num, s.systolic_bp
+  from wp.participants as p
+       inner join wp.screenings as s
+       on p.participant_id = s.participant_id;
+quit;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: Table WP.INNER_JOINED created, with 594 rows and 4 columns.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.05 seconds
+```
+
+**How to read it / verify.** The cardinal check of the course: **predict the row count from the table grains,
+then read it off the log.** An **inner join** keeps only matched keys → **594** rows (198 screened
+participants × 3 visits); a **left join** keeps every participant → **596** rows (the 2 enrolled-but-unscreened
+people surface with missing screening fields). A count of neither — a 1,782-row Cartesian blow-up, or 0 rows
+from a character-vs-numeric key mismatch — is a bug, not a result. The workflow move is *the row count tells
+you which rows the join kept*. (Worked fully in
+[Week 6 — PROC SQL and joins](../notes/week-06-proc-sql-and-joins.qmd) and
+[Lab 6](../labs/lab-06-proc-sql-joins-and-relationship-checks.qmd).)
+
+### `PROC SORT` — order rows by a key
+
+**What it is for.** Sorts a dataset by one or more `BY` variables. Many SAS operations — `BY`-group processing
+in a DATA step or PROC, and a DATA step `MERGE` — **require sorted input**, so `PROC SORT` is the quiet
+prerequisite that prevents the `ERROR: Data set is not sorted` failure.
+
+**When to use it.** Before any `BY site;` step, before a `MERGE`, and when you need a deduplicated key. Use
+`nodupkey` *carefully* — it drops duplicate-key rows, which is the right tool for de-duplication but a silent
+data-loss bug if used by accident.
+
+**Key statements/options.** `by` lists the sort variables; `out=` writes a sorted copy (so the original is
+untouched); `nodupkey` keeps one row per key. See [PROC SORT](https://documentation.sas.com/) (the `BY`
+statement and `NODUPKEY`).
+
+```sas
+proc sort data=wp.participants out=wp.participants_sorted;
+  by participant_id;
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 200 observations read from the data set WP.PARTICIPANTS.
+NOTE: The data set WP.PARTICIPANTS_SORTED has 200 observations and 8 variables.
+```
+
+**How to read it / verify.** Observations in (**200**) should equal observations out (**200**) — *unless* you
+used `nodupkey`, in which case a smaller out-count tells you exactly how many duplicate keys were dropped
+(precisely how the 8 duplicate-`participant_id` rows were removed in cleaning). The workflow move is *sort is a
+prerequisite, and a dropped-row count is information, not noise*.
+
+### `PROC TRANSPOSE` — reshape wide ↔ long
+
+**What it is for.** Reshapes a dataset between **long** (one row per participant-per-visit, as `screenings` is
+stored) and **wide** (one row per participant, with `visit1_bp`, `visit2_bp`, `visit3_bp` columns) layouts.
+Different procedures want different layouts, so reshaping is a routine workflow step.
+
+**When to use it.** When a procedure needs the layout you do not have — e.g. a per-participant model wants one
+wide row per person, while a repeated-measures view wants long. Pair it with `MERGE`/`SQL` to rejoin.
+
+**Key statements/options.** `by` identifies the unit that stays one row (the participant); `id` supplies the
+column names in the wide result (the visit number); `var` names the value to spread. See
+[PROC TRANSPOSE](https://documentation.sas.com/) (the `BY`, `ID`, and `VAR` statements).
+
+```sas
+proc sort data=wp.screenings;       /* TRANSPOSE wants sorted BY input */
+  by participant_id visit_num;
+run;
+
+proc transpose data=wp.screenings out=wp.bp_wide prefix=visit;
+  by participant_id;
+  id visit_num;
+  var systolic_bp;
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: The data set WP.BP_WIDE has 198 observations and 4 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.04 seconds
+```
+
+**How to read it / verify.** Going long → wide, the **594** screening rows collapse to **198** wide rows (one
+per screened participant) with 3 visit columns — confirm $198 \times 3 = 594$, so no values were lost or
+duplicated in the reshape. The workflow move is *check the row and column count before and after a reshape*,
+exactly as you check after a join. (See [Week 12 — reshaping and merging](../notes/week-12-reshaping-and-merging.qmd).)
+
+## Analyze and report
+
+::: {.callout-note}
+**Statistics weeks (9, 10, 11) lean on a statistics background, too.** For the *ideas* behind t-tests, ANOVA,
+regression, and logistic regression — assumptions, what the test answers, responsible interpretation — the
+course points to **Introduction to Modern Statistics (IMS), 2nd ed.** (Çetinkaya-Rundel & Hardin, CC BY-SA
+3.0, [openintro-ims.netlify.app](https://openintro-ims.netlify.app/)). SAS gives you the *procedure*; IMS gives
+you the *reasoning*. Two cautions run through all four: **"statistically significant" is not "practically
+important,"** and **observational data are not causal** — the wellness arms are not described as randomized, so
+every comparison below is **associational**.
+:::
+
+### `PROC SGPLOT` — one analysis graph
+
+**What it is for.** Produces a single statistical graph — histogram, boxplot, scatter, series — from a
+dataset. The course's standard plotting procedure for report-ready visuals (with `PROC SGPANEL` for paneled
+versions).
+
+**When to use it.** To *see* a distribution before summarising it (a `systolic_bp` histogram), to compare
+groups visually (boxplots of `systolic_bp` by `site` ahead of ANOVA), or to check a regression's residuals.
+
+**Key statements/options.** One plot statement per layer — `histogram`, `vbox ... / category=`, `scatter x= y=`
+— plus `xaxis`/`yaxis` for labels and ranges. Output goes to whatever ODS destination is open. See
+[PROC SGPLOT](https://documentation.sas.com/) (the plot statements).
+
+```sas
+proc sgplot data=wp.screenings;
+  histogram systolic_bp;
+  xaxis label="Systolic BP (mmHg)";
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 594 observations read from the data set WP.SCREENINGS.
+NOTE: PROCEDURE SGPLOT used (Total process time):
+      real time           0.11 seconds
+```
+
+**How to read it / verify.** A graph still needs verifying: confirm **594** observations were read and that the
+axis range matches the data (here roughly 96–178, the locked min/max). A histogram centred near **128** with a
+mild right tail agrees with the `PROC UNIVARIATE` summary above — if the picture and the table disagree, trust
+neither until you find out why. **Accessibility note:** a published figure needs alt text and a data-table
+fallback (the underlying counts), which is a release-blocking task in this build. The workflow move is *the
+graph must match the table it summarises*. (See [Week 8 — visualization and ODS output](../notes/week-08-visualization-and-ods-output.qmd).)
+
+### `PROC TTEST` — compare two group means
+
+**What it is for.** Tests whether the **means of two groups** differ, with a confidence interval for the
+difference. Here: `systolic_bp` for `coaching` vs `usual_care`.
+
+**When to use it.** A numeric outcome and exactly **two** groups. State the assumptions first — independent
+observations, approximate normality — and read the equal-variance vs Satterthwaite row before choosing a
+$t$ value.
+
+**Key statements/options.** `class` names the two-level grouping variable; `var` names the numeric outcome. The
+output's equal-variance (pooled) and unequal-variance (Satterthwaite) rows, plus a folded-$F$ check, tell you
+which line to read. See [PROC TTEST](https://documentation.sas.com/) (the `CLASS` and `VAR` statements);
+background in **IMS** (comparing two means).
+
+```sas
+proc ttest data=wp.baseline;       /* one row per participant, n = 198 */
+  class arm;
+  var systolic_bp;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  arm           N      Mean     Std Dev
+  -----------   --     -----    -------
+  coaching      99    125.90      11.8
+  usual_care    99    130.80      12.2
+
+  Diff (coaching - usual_care)   -4.90   95% CI (-7.20, -2.60)
+  Pooled   t = -4.27   DF = 196   Pr > |t| < .0001
+```
+
+**How to read it / verify.** The difference is **−4.9 mmHg** (95% CI **(−7.2, −2.6)**), pooled **t = −4.27**,
+df **196**, **p < .0001**. The interval excludes 0, so the groups are statistically distinguishable in this
+synthetic sample. But verify the *grain* (this is the one-row-per-participant baseline slice, $n = 198$, **not**
+the 594 visit rows) and the assumption (check the equal-variance row before reading the pooled $t$). Crucially,
+this is **associational, not causal** — the arms are not randomized — so it is "coaching-arm participants
+averaged lower BP," **not** "coaching lowered BP." (Worked in
+[Week 9 — t-tests, ANOVA, group comparisons](../notes/week-09-ttests-anova-group-comparisons.qmd).)
+
+### `PROC ANOVA` / `PROC GLM` — compare three or more group means
+
+**What it is for.** Analysis of variance: tests whether the means of **three or more** groups differ.
+`PROC ANOVA` is for balanced designs; **`PROC GLM`** is the general workhorse (handles unbalanced data and
+covariates), so the course uses `GLM` for `systolic_bp` by `site` (North/Central/South).
+
+**When to use it.** A numeric outcome and **3+** groups. The omnibus $F$ test answers *"do any group means
+differ?"*; a `means ... / tukey` follow-up answers *"which ones?"* — you need both.
+
+**Key statements/options.** `class` names the grouping factor; `model outcome = factor;` specifies the
+analysis; `means factor / tukey;` adds multiplicity-adjusted pairwise comparisons. See
+[PROC GLM](https://documentation.sas.com/) (the `CLASS`, `MODEL`, and `MEANS` statements); background in
+**IMS** (ANOVA).
+
+```sas
+proc glm data=wp.baseline;
+  class site;
+  model systolic_bp = site;
+  means site / tukey;
+run;
+quit;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Source     DF   Mean Square    F Value   Pr > F
+  --------   --   -----------   -------   ------
+  site        2        ...         5.10   0.0071
+  Error     195        ...
+
+  site      systolic_bp mean
+  -------   ----------------
+  North               126.1
+  Central             128.9
+  South               130.6
+```
+
+**How to read it / verify.** The omnibus test is **F(2, 195) = 5.10, p = 0.0071** — at least one site mean
+differs. The means (North **126.1**, Central **128.9**, South **130.6**) tell you the *direction*; the Tukey
+follow-up tells you *which pairs* are distinguishable, which the $F$ alone does not. Verify the DF: 3 sites give
+**2** numerator DF, and the denominator **195** reflects $n = 198$ participants. Same cautions as the t-test —
+observational, so associational, not causal. (See
+[Week 9](../notes/week-09-ttests-anova-group-comparisons.qmd).)
+
+### `PROC REG` — linear regression
+
+**What it is for.** Fits a **linear** model of a numeric outcome on one or more numeric predictors, with
+coefficients, $R^2$, RMSE, and residual diagnostics. Here: `systolic_bp` on `age` and `baseline_bmi`.
+
+**When to use it.** A continuous outcome and numeric predictors, when you want to describe or predict a linear
+relationship — and check the linearity/normal-residual assumptions that make it trustworthy.
+
+**Key statements/options.** `model outcome = predictors;` specifies the fit; `/ clb` adds confidence limits on
+the coefficients; a `plots=` option requests residual diagnostics. See [PROC REG](https://documentation.sas.com/)
+(the `MODEL` statement); background in **IMS** (multiple regression).
+
+```sas
+proc reg data=wp.baseline;
+  model systolic_bp = age baseline_bmi;
+run;
+quit;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Root MSE        12.60      R-Square   0.2140
+
+  Variable        Estimate   Pr > |t|
+  -------------   --------   --------
+  Intercept          86.50    <.0001
+  age                 0.45    <.0001
+  baseline_bmi        1.02    <.0001
+```
+
+**How to read it / verify.** The model explains **$R^2 = 0.214$** of the variation in `systolic_bp`, with
+**RMSE = 12.6**; each predictor's slope is positive (older age and higher BMI associate with higher BP). Verify
+**n = 198** (one row per participant) and that the slopes have a sensible sign and scale before trusting them —
+then check residual plots for the linearity and constant-variance assumptions. $R^2 = 0.214$ means most
+variation is *unexplained*, a useful honesty check. Associational, not causal. (See
+[Week 10 — linear regression](../notes/week-10-linear-regression.qmd) and
+[Lab 10](../labs/lab-10-linear-regression-and-diagnostics.qmd).)
+
+### `PROC LOGISTIC` — logistic regression
+
+**What it is for.** Models a **binary (0/1) outcome** on predictors, returning **odds ratios** and a model
+C-statistic (AUC). Here: `goal_met` (1 = met goal) on `arm`, `age`, and `baseline_bmi`.
+
+**When to use it.** A 0/1 outcome. The load-bearing setup decision is **which level is modeled**: state
+`(event='1')` (or use `descending`) so SAS models the probability of *meeting* goal, not its complement — by
+default it may model the lower level, flipping every odds ratio.
+
+**Key statements/options.** `model y(event='1') = predictors;` fixes the modeled event; `class` declares
+categorical predictors and the reference level; an `oddsratio`/`clodds` option reports the ORs with intervals.
+See [PROC LOGISTIC](https://documentation.sas.com/) (the `MODEL` `event=` option and `CLASS`); background in
+**IMS** (logistic regression).
+
+```sas
+proc logistic data=wp.baseline;
+  class arm (ref='usual_care') / param=ref;
+  model goal_met(event='1') = arm age baseline_bmi;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+  Effect              Odds Ratio   95% CI            Pr > ChiSq
+  -----------------   ----------   --------------   ----------
+  arm (coaching)            1.78   (1.28, 2.47)        0.0006
+  age                       0.98   (0.96, 1.00)
+  baseline_bmi              0.93   (0.89, 0.97)
+
+  Association: c (AUC) = 0.69
+```
+
+**How to read it / verify.** Coaching-arm participants have **1.78** times the *odds* of meeting goal vs
+usual_care (95% CI **1.28–2.47**, p = 0.0006), adjusting for age and BMI; the model's C-statistic (AUC) is
+**0.69** (modest discrimination). Two non-negotiable checks: confirm the output names the modeled event as
+**`goal_met = 1`** (otherwise every OR is inverted), and remember **an odds ratio is not a risk ratio** — 1.78
+on the odds scale is not "78% more likely." Associational, not causal. (See
+[Week 11 — logistic regression and categorical outcomes](../notes/week-11-logistic-regression-categorical.qmd).)
+
+### `PROC SURVEYSELECT` — random samples and bootstrap
+
+**What it is for.** Draws random samples (simple, stratified, with or without replacement) from a dataset —
+including the **bootstrap** resampling used in the simulation week. It is how you generate repeated samples
+reproducibly.
+
+**When to use it.** When you need a random subsample, a stratified sample, or `B` bootstrap replicates of an
+estimate. Pair it with `BY`-group processing to compute the statistic on each replicate.
+
+**Key statements/options.** `method=urs` (unrestricted, i.e. with replacement) for the bootstrap; `samprate=`
+or `n=` for the size; `reps=` for the number of replicates; and **`seed=20260824`** for reproducibility. See
+[PROC SURVEYSELECT](https://documentation.sas.com/) (the `METHOD`, `REPS`, and `SEED` options).
+
+```sas
+proc surveyselect data=wp.baseline
+     method=urs samprate=1 reps=10000
+     seed=20260824 out=wp.boot;
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: The data set WP.BOOT has 1980000 observations and ... variables.
+NOTE: PROCEDURE SURVEYSELECT used (Total process time):
+      real time           2.40 seconds
+```
+
+**How to read it / verify.** Confirm the **`seed=20260824`** appears (so the draw is reproducible and matches
+the locked simulation) and that the output size is sensible: 10,000 replicates of an $n = 198$ sample give
+$198 \times 10{,}000 = 1{,}980{,}000$ rows. The bootstrap and the DATA-step `RAND` simulations share the seed,
+producing the locked week-13 results — empirical **power ≈ 0.99**, **Type I rate ≈ 0.05**, and a sampling SE of
+the mean `systolic_bp` of about **0.58**. The workflow move is *anything random gets the fixed seed, or it is
+not reproducible*. (See [Week 13 — simulation and random generation](../notes/week-13-simulation-and-random-generation.qmd)
+and [Lab 13](../labs/lab-13-simulation-and-repeated-analyses.qmd).)
+
+### ODS — routing and selecting output
+
+**What it is for.** The Output Delivery System routes any procedure's output to a destination — **HTML**
+(the default), **PDF**, or **RTF** for reports — and lets you name and select individual output objects.
+
+**When to use it.** Whenever you build a report (open `ods pdf`/`ods rtf` around the procedures) or want just
+one piece of a procedure's output. `ODS TRACE` names the objects a procedure produces; `ODS SELECT` keeps only
+the ones you want.
+
+**Key statements/options.** `ods pdf file="...";` / `ods pdf close;` wrap report procedures; `ods trace on;`
+lists object names in the log; `ods select <Object>;` filters. See [ODS](https://documentation.sas.com/) (the
+destination statements and `ODS SELECT`/`TRACE`).
+
+```sas
+ods trace on;                      /* name the objects in the log */
+proc ttest data=wp.baseline;
+  class arm;
+  var systolic_bp;
+run;
+ods trace off;
+
+ods pdf file="/home/u_wellness/report/wellness_report.pdf";
+proc means data=wp.screenings n mean std;
+  var systolic_bp;
+run;
+ods pdf close;
+```
+
+```text
+SAS log (synthetic)
+
+Output Added:
+-------------
+Name:       ConfLimits
+Label:      Confidence Limits
+...
+NOTE: ODS PDF printed ... pages to /home/u_wellness/report/wellness_report.pdf.
+```
+
+**How to read it / verify.** `ODS TRACE` writes each output object's **name** to the log (so you can `ODS
+SELECT ConfLimits;` to keep just the interval table); confirm the `ODS PDF` close note reports the file was
+written. **Never paste a screenshot** of code or output into a report — show code as text and output as a typed
+table or a labeled figure (with alt text and a data-table fallback). The workflow move is *route output
+deliberately, and name what you kept*. (See [Week 8](../notes/week-08-visualization-and-ods-output.qmd) and
+[Week 14 — reproducible SAS analysis report](../notes/week-14-reproducible-sas-analysis-report.qmd).)
+
+## What this page is — and is not
+
+This is a **study aid in the course's own words**: a map of which procedure answers which question, with the
+verification check that belongs to each. It is **not** the SAS documentation and not a complete syntax
+reference — every section names only the handful of statements and options the course uses, and points you to
+the authoritative SAS doc page for the rest. When you need the full statement list, every option, or the exact
+default behaviour, **open the SAS documentation** (linked per section above). Finding the authoritative answer
+yourself is a course skill, not a detour.
+
+## Reading and source pointer
+
+For the procedures on this page, the authoritative reference is the official **SAS documentation**
+([documentation.sas.com](https://documentation.sas.com/), [support.sas.com](https://support.sas.com/)) — the
+procedure page for each `PROC` above (its statements, options, and output objects). On the statistical
+procedures — **PROC TTEST, PROC GLM/ANOVA, PROC REG, PROC LOGISTIC** (the course's weeks 9, 10, 11) — pair the
+SAS syntax with the statistical background in **Introduction to Modern Statistics (IMS), 2nd ed.**
+(Çetinkaya-Rundel & Hardin, CC BY-SA 3.0, [openintro-ims.netlify.app](https://openintro-ims.netlify.app/)): the
+chapters on **comparing means (t-tests and ANOVA)**, **linear regression**, and **logistic regression** for the
+assumptions, the meaning of each test, and responsible interpretation. Use both as reading pointers, in the
+course's own words — practise finding the syntax and the reasoning yourself. These notes are the course's own
+synthesis: grounded in the SAS documentation and open statistics references, but not copied from them. SAS® and
+all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** Every SAS snippet, every log line, and every output table on this page is
+**hand-authored, synthetic, and was NOT run** — SAS is proprietary and is not executed in this build. The
+load-bearing numbers reproduced here are the locked values of the **wellness-program study** (seed
+`streaminit(20260824)`): the **200** cleaned participants and the **104/96**, **100/100**, **66/70/64**
+frequencies; the **594** screening rows with `systolic_bp` mean **128.4** (SD **14.2**), `steps_k` mean
+**7.45**, and `goal_met` proportion **0.41**; the **594**-row inner join versus **596**-row left join; the
+TTEST difference **−4.9** (CI **−7.2, −2.6**; **t = −4.27**, df 196, p < .0001); the ANOVA **F(2, 195) = 5.10**,
+p = 0.0071 with site means **126.1/128.9/130.6**; the REG intercept **86.5**, slopes **0.45**/**1.02**,
+**$R^2 = 0.214$**, RMSE **12.6**; the LOGISTIC arm OR **1.78** (CI **1.28–2.47**, p = 0.0006), age OR **0.98**,
+BMI OR **0.93**, and AUC **0.69**; and the simulation results power **≈ 0.99**, Type I **≈ 0.05**, sampling SE
+**≈ 0.58**. They are drafted "as if run" and cross-checked only for internal and narrative consistency. The
+course **SAS execution/output gate is BLOCKED**; a rendered code block or typed listing is not evidence the code
+runs or the numbers are right. Do not treat any value here as a confirmed reference until the human/SAS-run
+sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- [SAS workflow glossary](sas-workflow-glossary.qmd) — library, dataset, key, grain, character vs numeric,
+  missing values, and the NOTE / WARNING / ERROR log levels behind every procedure here.
+- [Log & verification guide](log-and-verification-guide.qmd) — reading the log as primary output and the
+  row-count, type, and `NMISS` checks each procedure above relies on.
+- [SAS access & project setup](sas-access-setup.qmd) — reaching a SAS environment and organizing a project
+  (and the SAS-access caveat).
+- The week notes, where each procedure is introduced in workflow order — start at
+  [Week 1 — what SAS is for now](../notes/week-01-what-sas-is-for-now.qmd).
+
+---
+
+*This page is a study reference. For graded specifics — deadlines, submissions, and policies — **Blackboard
+(the LMS) is authoritative**.*

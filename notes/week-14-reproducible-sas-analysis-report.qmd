@@ -1,0 +1,528 @@
+---
+title: "Week 14 — Reproducible SAS analysis report"
+subtitle: "Building an analysis another person could rerun and verify"
+page_mode: software_lab_week
+week_contract: software_note_lab
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — ODS (PDF/RTF) destinations — supports a report-ready, multi-page analysis report"
+  - "SAS documentation — %INCLUDE and program organization — supports one program top-to-bottom from named files"
+  - "SAS documentation — PROC CONTENTS — supports verifying variable types and counts before you trust output"
+toc: true
+---
+
+## Concept note
+
+For thirteen weeks you have built the pieces of an analytics workflow one at a time: a `libname` and a project
+folder, a DATA step that cleans and validates, PROC SQL joins with the row counts checked, PROC MEANS and
+PROC FREQ summaries, ODS reports, the statistical procedures (TTEST, GLM, REG, LOGISTIC), reshaping and
+merging, and a simulation. This week is the **project workshop**: you assemble those pieces into a single,
+reproducible **analysis report** — one program that runs top-to-bottom and produces, every time, the same
+validated tables, the same figures, the same written conclusion. The recurring test of the whole course
+becomes the deliverable here: **would someone else be able to understand, rerun, and verify this?**
+
+A reproducible SAS analysis report is not a pile of output. It is a documented chain, and the chain has a fixed
+shape you should be able to recite:
+
+1. **Question** — the analytic question stated in plain words, with the population and the outcome named.
+2. **Analysis-ready data** — raw data imported, cleaned, validated, and joined to the grain the question needs,
+   with the row counts checked at every step.
+3. **Procedures** — the summaries and statistical procedures that answer the question, each with its
+   assumptions named before its output is read.
+4. **Output** — report-ready tables and figures, sent through ODS to a file a stakeholder can open (PDF/RTF),
+   not screenshots.
+5. **Verification** — a block, in the program itself, that records what the log should say, the row counts
+   before and after each join, the variable types, the `NMISS` checks, and the seed.
+6. **Written conclusion** — a paragraph that says what the analysis found, in the units of the question, and
+   — just as load-bearing — what it does **not** show.
+
+The difference between a report and a reproducible report is steps 5 and 6, and the discipline that the whole
+thing runs from one file with no manual point-and-click. A correct number you produced by clicking through
+menus is a number nobody — including future you — can regenerate. A correct number produced by a program that
+runs start to finish, logs its row counts, and carries its own verification notes is a result on evidence
+rather than on trust. That is the entire point of this week.
+
+A boundary specific to this build, stated once and meant throughout: **SAS is not executed here.** Every
+program, every log line, and every output table on this page is **hand-authored and synthetic** — the
+recurring `wellness-program study`, seed `streaminit(20260824)`. Nothing was run. A rendered, syntax-highlighted
+code block proves nothing about whether the code would execute or whether the numbers are right; this page is a
+teaching template for the *shape* of a reproducible report, and its load-bearing numbers are the locked
+synthetic study figures pending a human/SAS-run sign-off. The study is **synthetic and observational** — not
+real health data, and the arm difference is associational, not causal.
+
+## Setup and practice sequence
+
+Work through these numbered steps. They build one report program for the `wellness-program study`, top to
+bottom — the same skeleton you will reuse for the final analytics project. Treat this as a **your-turn**
+sequence: open SAS Studio in the course-designated environment, create one program file, and add to it as you
+go. (You will *read and assemble* the code here; the gate is blocked, so nothing is executed in these notes.)
+
+1. **State the question and the data at the top, in comments.** The analytic question for the study slice:
+   *does the coaching arm differ from usual care on systolic blood pressure, and what predicts meeting the step
+   goal?* Name the population (synthetic RiverCity wellness enrollees), the outcomes (`systolic_bp`,
+   `goal_met`), and the design caveat (observational; arms not described as randomized).
+2. **Set the environment deterministically.** One `options` line, one `libname` for the permanent data, and
+   `call streaminit(20260824)` anywhere randomness appears. No interactive settings the next reader cannot see.
+3. **Build analysis-ready data, checking counts.** Import the **210** raw `participants` rows, clean to **200**
+   unique (drop the 8 duplicate-`participant_id` rows and 2 internal test rows; flag the `age=199` typo, the 12
+   blank `sex`, the `enroll_date` informat, the 2 impossible `baseline_bmi=0`), then join to `screenings`. The
+   **inner join is 594 rows; the left join is 596** (the 2 unscreened surface). Check both.
+4. **Run the procedures the question needs, at the right grain.** PROC MEANS for the marginal description over
+   **all 594** screening rows; then the participant-level fits on the **baseline slice** (`where visit_num=1`,
+   one row per participant → **198** rows, the same baseline n weeks 9–11 used, so the three visits per person
+   are not double-counted): PROC TTEST `systolic_bp` by `arm`; PROC REG `systolic_bp = age baseline_bmi`; PROC
+   LOGISTIC `goal_met(event='1') = arm age baseline_bmi`. Name each procedure's assumptions — and its grain —
+   before reading its output.
+5. **Send report-ready output through ODS.** Open `ods pdf`, label each section with `ods proclabel`, run the
+   PROCs, and **close** the destination. The file is not finished until you close it.
+6. **Write the verification notes block and the conclusion.** A commented block in the program that records the
+   expected log lines, the row counts, the type and `NMISS` checks, and the seed; then a written conclusion in
+   the units of the question.
+
+Here is the **end-to-end report program**, shown whole so you can see the chain. It is static teaching code —
+not executed on this page.
+
+```sas
+/*===========================================================================*
+ *  wellness_report.sas  -- Reproducible analysis report (Week 14)            *
+ *  Question: does coaching vs usual_care differ on systolic_bp, and what     *
+ *            predicts meeting the step goal (goal_met)?                       *
+ *  Data:     synthetic wellness-program study; seed streaminit(20260824).    *
+ *            Observational -- arms are NOT described as randomized.           *
+ *  Author:   <you>           Run top-to-bottom; no point-and-click.          *
+ *===========================================================================*/
+
+options validvarname=v7 nodate nonumber;          /* deterministic settings  */
+libname well "/home/u_rivercity/wellness";        /* permanent library       */
+
+/* --- 1. Analysis-ready data: clean participants, then join to screenings -- */
+data well.participants_clean;
+    set well.participants_raw;                     /* 210 raw rows imported   */
+    if _internal_test = 1 then delete;             /* drop 2 internal test rows */
+    if age = 199 then age = .;                     /* flag the age typo -> missing */
+    if baseline_bmi = 0 then baseline_bmi = .;     /* 2 impossible BMI -> missing  */
+run;
+
+proc sort data=well.participants_clean nodupkey
+          out=well.participants(label="200 unique enrolled participants");
+    by participant_id;                             /* drop 8 duplicate ids     */
+run;
+
+proc sql;
+    create table well.analysis as
+    select p.participant_id, p.arm, p.site, p.age, p.baseline_bmi,
+           s.visit_num, s.systolic_bp, s.steps_k, s.goal_met
+    from   well.participants as p
+    inner join well.screenings as s                /* inner join -> 594 rows   */
+      on   p.participant_id = s.participant_id;
+quit;
+
+/* --- 2. Report output through ODS PDF ------------------------------------- */
+ods graphics on;
+ods pdf file="/home/u_rivercity/reports/wellness_report.pdf" style=journal;
+
+ods proclabel "Systolic BP -- summary";
+proc means data=well.analysis n nmiss mean std min median max maxdec=1;
+    var systolic_bp;
+run;
+
+ods proclabel "Systolic BP by arm -- t-test (baseline slice)";
+proc ttest data=well.analysis(where=(visit_num=1)); /* one row/participant -> 198 */
+    class arm;                                     /* compare arms on baseline systolic_bp */
+    var   systolic_bp;
+run;
+
+ods pdf close;                                     /* file not finished until closed */
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 210 observations read from the data set WELL.PARTICIPANTS_RAW.
+NOTE: The data set WELL.PARTICIPANTS_CLEAN has 208 observations and 8 variables.
+NOTE: There were 208 observations read from the data set WELL.PARTICIPANTS_CLEAN.
+NOTE: 8 observations with duplicate key values were deleted.
+NOTE: The data set WELL.PARTICIPANTS has 200 observations and 8 variables.
+NOTE: Table WELL.ANALYSIS created, with 594 rows and 9 columns.
+NOTE: Writing ODS PDF(WEB) output to DISK destination
+      "/home/u_rivercity/reports/wellness_report.pdf", printer "PDF".
+NOTE: There were 594 observations read from the data set WELL.ANALYSIS.
+NOTE: ODS PDF printed 2 pages of output to file
+      "/home/u_rivercity/reports/wellness_report.pdf".
+```
+
+**Read the log, do not skim it.** The chain is right only if the counts are right: **210** raw rows read,
+**208** after the 2 test rows are deleted, **200** after the 8 duplicate keys are dropped, and the join
+produces **594** rows — the exact locked counts. The `Writing ODS PDF … to DISK` line confirms the report
+opened at the path you intended, and `ODS PDF printed 2 pages` confirms it was written and **closed**. The
+workflow move: you **read** the raw and cleaned datasets, **created** the analysis table and the PDF report,
+the **log confirmed** every count and a clean close, and the next section turns those confirmations into
+explicit verification notes that travel with the program.
+
+**Your turn (hands-on).** In your own provisioned SAS session, rebuild this program on the wellness-program
+study one step at a time: run the import, then the clean, then the join, and after each step *stop and read the
+log* — does it say `210`, then `208`, then `200`, then `594`? Only when those four counts match should you add
+the next procedure. This is the lab habit the whole course has been building toward: a program is not done when
+it runs without an ERROR; it is done when you have *checked* that it did what you intended.
+
+## Reproducible-file convention
+
+A reproducible report is **one program file, top to bottom, that another person could open and rerun without
+asking you a single question.** The convention is not decoration — it is what makes the result a result.
+
+- **One program, no manual steps.** Everything from `libname` to the closing `ods pdf close;` lives in one
+  `.sas` file (or a short master file that `%INCLUDE`s named pieces). No point-and-click, no "and then I
+  imported it by hand," no settings that exist only in your session.
+- **A `libname` for permanent data; `WORK` for scratch.** Permanent datasets get a named library
+  (`libname well "…"`); intermediate steps can use `WORK`. The reader must be able to see where the data live.
+- **Deterministic `options`, set once at the top.** `options validvarname=v7 nodate nonumber;` so the program
+  behaves the same on the next machine. Anything you rely on is visible, not assumed.
+- **`call streaminit(20260824)` (or `seed=20260824`) for anything random.** A simulation or a bootstrap that
+  uses a different seed gives different numbers; fixing the seed is what lets the reader reproduce your power
+  estimate of **0.99** and your Type I rate of **0.05** exactly. A result you cannot rerun to the same number
+  is a result on trust alone.
+- **Named files, named outputs.** `wellness_report.sas` produces `wellness_report.pdf`; intermediate datasets
+  carry labels (`participants` labelled "200 unique enrolled participants"). A reader should be able to trace
+  every output back to the step that made it.
+- **A verification-notes block in the program.** Not in your head, not in a separate email — *in the file*,
+  as comments, so it travels with the analysis.
+
+The `%INCLUDE` pattern lets you keep the master program short while each stage stays in its own named file:
+
+```sas
+/* wellness_report_master.sas -- the whole pipeline as one runnable program */
+options validvarname=v7 nodate nonumber;
+libname well "/home/u_rivercity/wellness";
+
+%include "/home/u_rivercity/programs/01_import.sas";    /* 210 raw rows in        */
+%include "/home/u_rivercity/programs/02_clean.sas";     /* -> 200 unique          */
+%include "/home/u_rivercity/programs/03_join.sas";      /* inner join -> 594 rows */
+%include "/home/u_rivercity/programs/04_analyze.sas";   /* MEANS/TTEST/REG/LOGISTIC */
+%include "/home/u_rivercity/programs/05_report.sas";    /* ODS PDF report         */
+
+/*---------------------------------------------------------------------------*
+ *  VERIFICATION NOTES  (rerun-checkable; fill from the log every run)        *
+ *  [ ] participants_raw read ............... 210 rows                        *
+ *  [ ] participants after clean+dedup ...... 200 rows (drop 8 dup + 2 test)  *
+ *  [ ] sex freq ............................ F 104 / M 96                     *
+ *  [ ] arm freq ............................ coaching 100 / usual_care 100    *
+ *  [ ] site freq ........................... North 70 / Central 66 / South 64*
+ *  [ ] inner join analysis ................. 594 rows  (left join = 596)      *
+ *  [ ] systolic_bp ......................... numeric; NMISS = 0; n = 594      *
+ *  [ ] t-test grain ........................ baseline slice; 198 (99/arm)     *
+ *  [ ] no unexpected WARNING / ERROR in the log                              *
+ *  [ ] seed for any random step ........... streaminit(20260824)             *
+ *---------------------------------------------------------------------------*/
+```
+
+```text
+SAS log (synthetic)
+NOTE: %INCLUDE (level 1) file /home/u_rivercity/programs/01_import.sas is file ...
+NOTE: There were 210 observations read from the data set WELL.PARTICIPANTS_RAW.
+NOTE: %INCLUDE (level 1) file /home/u_rivercity/programs/03_join.sas is file ...
+NOTE: Table WELL.ANALYSIS created, with 594 rows and 9 columns.
+NOTE: %INCLUDE (level 1) file /home/u_rivercity/programs/05_report.sas is file ...
+NOTE: ODS PDF printed 2 pages of output to file
+      "/home/u_rivercity/reports/wellness_report.pdf".
+```
+
+**What to check.** Each `%INCLUDE (level 1) file …` line confirms a stage ran in order, and the counts between
+them (**210 → … → 594**) confirm the chain is intact. The verification-notes block is a checklist you fill from
+the log on *every* run — not a one-time ritual. The workflow move: the program is now self-documenting, so a
+reader can rerun the master file, watch the same counts scroll past, and confirm your report from the evidence
+rather than from your word.
+
+## Worked examples
+
+### Worked example — the wellness-program study: the full pipeline as one reproducible report
+
+**The task.** Produce the reproducible analysis report for the study slice: clean to **200** participants, join
+to **594** screening rows, and answer both questions — the arm comparison on `systolic_bp` and the predictors
+of `goal_met` — in one program with verification notes. The data are the synthetic `wellness-program study`
+(seed `streaminit(20260824)`; observational). The import, clean, and join code is the program in *Setup* above;
+here is the analysis stage and its output.
+
+```sas
+/* 04_analyze.sas -- the procedures the question needs (assumptions named) */
+
+/* (a) t-test: systolic_bp by arm on the baseline slice (one row/participant). */
+/*     Assumes independent groups, approx normal; read pooled vs Satterthwaite.*/
+/*     visit_num=1 collapses the 594-row table to 198 participants (99/arm).   */
+proc ttest data=well.analysis(where=(visit_num=1));
+    class arm;
+    var   systolic_bp;
+run;
+
+/* (b) logistic: goal_met(event='1') = arm age baseline_bmi, baseline slice.   */
+/*     visit_num=1 -> 198 participants (the same fit as week 11, 82 events).    */
+/*     Model the goal-met level explicitly; an OR is NOT a risk ratio.         */
+proc logistic data=well.analysis(where=(visit_num=1));
+    class arm (ref="usual_care") / param=ref;
+    model goal_met(event='1') = arm age baseline_bmi;
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 198 observations read from the data set WELL.ANALYSIS.
+      WHERE visit_num=1;
+NOTE: PROCEDURE TTEST used (Total process time): real time 0.21 seconds
+NOTE: There were 198 observations read from the data set WELL.ANALYSIS.
+      WHERE visit_num=1;
+NOTE: PROCEDURE LOGISTIC used (Total process time): real time 0.34 seconds
+```
+
+```text
+Output (synthetic, not executed) -- PROC TTEST, systolic_bp by arm (baseline slice, n=198)
+arm           N      Mean     Std Dev
+coaching     99     125.9      11.8
+usual_care   99     130.8      12.1
+Diff (1-2)        -4.9
+Method        Variances    DF    t Value    Pr > |t|
+Pooled        Equal        196    -4.27      <.0001
+                  95% CL Mean for Diff:  (-7.2, -2.6)
+```
+
+```text
+Output (synthetic, not executed) -- PROC LOGISTIC, odds ratio estimates (baseline slice, n=198)
+Effect                  Point Est.    95% Wald Confidence Limits
+arm coaching vs usual     1.78            1.28        2.47
+age                       0.98            0.96        1.00
+baseline_bmi              0.93            0.89        0.97
+Association of Predicted Probabilities and Observed Responses
+   c (AUC) = 0.69
+```
+
+**The verification check.** Read the grain off each PROC. Both the t-test and the logistic model run on the
+**baseline slice** — `WHERE visit_num=1` collapses the 594-row analysis table to one row per participant, so the
+log shows **198 observations read** (99 per arm, df **196** for the t-test) for each, the same baseline n the
+week-9 and week-11 fits used. Confirm that grain is the one you intended: a t-test or logistic that silently ran
+on all 594 visit-rows would triple the N and shrink every standard error, since the three visits per participant
+are not independent. The **594-row** marginal `systolic_bp` summary (PROC MEANS) and the **198-row** by-arm and
+modeled fits answer different questions — read each off the log so you never confuse them. Confirm `systolic_bp`
+is **numeric** with **`NMISS = 0`** (from the PROC MEANS earlier), so no rows are silently dropped, and confirm
+the row counts upstream were **210 → 200 → 594**. For the logistic model, read the log for the modeled level:
+PROC LOGISTIC must say it modeled `goal_met = '1'` with `usual_care` as the reference — if it silently modeled
+`goal_met = '0'`, every odds ratio would invert. The `class arm (ref="usual_care")` and
+`model goal_met(event='1')` statements are exactly the guardrails that make the **1.78** mean what you think it
+means.
+
+**The interpretation.** Across all **594** screening records `systolic_bp` averages **128.4** mm Hg with a
+standard deviation of **14.2** (median **127**, min **96**, max **178**) — the marginal summary the PROC MEANS
+stage reports. On the **baseline slice** (one row per participant, 99 per arm — the same 198-row baseline the
+week-9 t-test used), the coaching arm averaged **125.9** mm Hg versus **130.8** for usual care, a difference of
+**−4.9** (95% CI **(−7.2, −2.6)**; pooled **$t = -4.27$**, df **196**, **$p < .0001$**) — a statistically clear
+gap of about 5 mm Hg. The logistic model,
+fit on the same **198-row** baseline slice (**82** met goal, **116** did not — about **41%**), says participants
+in coaching had **1.78** times the odds of meeting the step goal (95% CI **1.28–2.47**, $p = 0.0006$) versus
+usual care, adjusting for age (OR **0.98**) and baseline BMI (OR **0.93**), with a model **C-statistic (AUC) of
+0.69**. Name the workflow move: you **read** the cleaned, joined analysis table; **ran** the two procedures with
+their assumptions named; the **log confirmed** the grain (**198** baseline rows for both the t-test and the
+logistic, **594** for the marginal MEANS); and you **checked** the type, `NMISS`, and the modeled level before
+trusting a single number. What this report does **not** show: the study is
+**observational** — the arms are **not** described as randomized — so the arm difference and the odds ratio are
+**associational, not causal**; **"statistically significant" is not "practically important"** (whether ~5 mm Hg
+matters clinically is a separate judgment); and an **odds ratio is not a risk ratio** (1.78 is an odds
+multiplier, not "1.78 times as likely"). A reproducible report states all three caveats in the written
+conclusion, not just the estimates.
+
+### Worked example — transfer: outlining the same skeleton for a new synthetic question
+
+**The task.** Reuse the exact reproducible-report skeleton on a **different synthetic problem**, to prove the
+shape transfers. Suppose a new (still synthetic) question on the same study: *does daily step count
+(`steps_k`), measured in thousands of steps, differ across the three sites?* This is a new outcome
+(`steps_k`, locked mean **7.45**) and a new procedure (PROC GLM / ANOVA, three groups → `site`), but the same
+six-step chain — and the same verification discipline. You are **outlining**, not re-deriving: fill the
+skeleton, keep the counts, name the assumptions.
+
+```sas
+/* steps_by_site_report.sas -- same skeleton, new synthetic question */
+options validvarname=v7 nodate nonumber;
+libname well "/home/u_rivercity/wellness";
+
+ods pdf file="/home/u_rivercity/reports/steps_report.pdf" style=journal;
+
+/* ANOVA needs sorted BY groups; sort first or SAS errors "not sorted".        */
+/* Baseline slice (visit_num=1) -> one row/participant, 198 rows (df: 2,195).  */
+proc sort data=well.analysis(where=(visit_num=1)) out=work.analysis_s; by site; run;
+
+ods proclabel "Steps/day by site -- ANOVA";
+proc glm data=work.analysis_s;
+    class site;
+    model steps_k = site;       /* 3 groups -> F test; then which means differ */
+    means site;
+run;
+quit;
+
+ods pdf close;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 198 observations read from the data set WELL.ANALYSIS.
+      WHERE visit_num=1;
+NOTE: The data set WORK.ANALYSIS_S has 198 observations and 9 variables.
+NOTE: There were 198 observations read from the data set WORK.ANALYSIS_S.
+NOTE: PROCEDURE GLM used (Total process time): real time 0.29 seconds
+NOTE: ODS PDF printed 1 page of output to file
+      "/home/u_rivercity/reports/steps_report.pdf".
+```
+
+```text
+Output (synthetic, not executed) -- PROC GLM, steps_k by site
+                                    Sum of
+Source            DF     Squares    Mean Square   F Value   Pr > F
+site               2      —             —           —        —
+Error            195      —             —
+Means of steps_k:   overall mean = 7.45  (thousands of steps/day)
+```
+
+**The verification check.** The skeleton's safeguards carry over unchanged. The `198 observations read` line
+confirms the grain — like the t-test and logistic, this group comparison runs on the **baseline slice**
+(`visit_num=1`, one row per participant), so the ANOVA df read **(2, 195)**, i.e. N = 198; a GLM that ran on all
+594 visit-rows would report inflated, dependence-violating df. The **PROC SORT before the BY-group GLM** is the
+guardrail that prevents the classic `ERROR: Data set WORK.ANALYSIS_S is not sorted in ascending order` —
+by-group processing requires a prior sort. Confirm `steps_k` is **numeric** and check `NMISS`, exactly as for
+`systolic_bp`. The mean must land on the locked **7.45** (the `steps_k` mean holds at both the 594 grain and the
+198 baseline slice in this synthetic study); if it does not, the report ran on the wrong rows. Note that the per-group F statistic here
+is a **new** quantity for a **new** outcome — do not borrow the `systolic_bp`-by-`site` ANOVA result
+($F(2,195) = 5.10$) for it; that is a different variable, and equating them is exactly the kind of silent error
+the verification block exists to catch.
+
+**The interpretation.** The point of the transfer is the **shape**: the same six-step chain — question →
+analysis-ready data (594 rows built and checked; the group comparison fit on the 198-row baseline slice) →
+procedure (GLM, assumptions named, sorted first) → ODS PDF output → verification notes → written conclusion —
+produces a reproducible report for an entirely new question with no new machinery. Name the workflow move: you **reused** the skeleton, **swapped** the outcome and the procedure,
+**kept** every count check and the seed convention, and **named** the by-group sort assumption before reading
+the F test. What stays constant across both examples is the discipline; what changes is only the question and
+the procedure that answers it. That is what makes the skeleton worth learning once and reusing for the final
+project.
+
+## Debugging
+
+The signature failure of report week is a program that **looks** finished but does not **rerun** to the same
+result — the reproducibility break (risk 12, the whole point of the week). Three concrete snags and their
+fixes, each a log/merge/type story you have met before, now biting at report scale:
+
+- **The PDF will not open (forgotten `ods pdf close;`).** You open `ods pdf file="…";`, run the PROCs, and the
+  file is half-written or locked. The log gives it away: there is a `Writing ODS PDF … to DISK` line but **no**
+  matching `ODS PDF printed N pages` line. The fix is to **close every destination you open** — make
+  `ods pdf close;` as automatic as ending a step with `run;`. A report that never closed is a report nobody can
+  read.
+
+- **A many-to-many merge silently inflates the row count.** If you join with a DATA-step `MERGE` on
+  `participant_id` and the key repeats on **both** sides (participants and screenings both have multiple rows
+  per id when you get the BY wrong), the log warns
+  `WARNING: MERGE statement has more than one data set with repeats of BY values.` and the output row count is
+  wrong — not 594, and not 596, but some inflated cross-product. The fix is the week-6 lesson: use a **PROC SQL
+  join** (which makes the join type explicit and does not require pre-sorting) and **check the row count**
+  against the locked 594 (inner) / 596 (left). The merge warning is not noise; it is the bug announcing itself.
+
+  ```text
+  SAS log (synthetic) -- the merge bug, before the fix
+  WARNING: MERGE statement has more than one data set with repeats of BY values.
+  NOTE: The data set WORK.ANALYSIS has 1782 observations and 9 variables.
+  ```
+
+  `1782` instead of `594` is the tell — a many-to-many cross-product. Replace the `MERGE` with the
+  `inner join` from the *Setup* program and the count returns to **594**.
+
+- **A character/numeric mix-up blocks a procedure or inverts a result.** If `goal_met` was imported as
+  character `"1"`/`"0"`, PROC LOGISTIC will not model it as a 0/1 event and `stat=mean`-style summaries fail;
+  if `enroll_date` is still the character string `"08/24/2026"` rather than a real SAS date read with the
+  `MMDDYY10.` informat, any date arithmetic is wrong. The log flags type conversions
+  (`NOTE: Character values have been converted to numeric …`) — read it. The fix is to confirm types with
+  **PROC CONTENTS** before the analysis and convert explicitly with `input()`/`put()`. Character vs numeric is
+  load-bearing; verify it, do not assume it.
+
+The thread through all three: the bug is **in the log**, and the report is only reproducible once the log is
+clean (no unexpected WARNING/ERROR), the row counts match (594 / 596), and the types are confirmed. Debug the
+log, not the output window.
+
+## AI Use Note
+
+You may use an AI assistant on the report — to explain an ODS option, draft a `%INCLUDE` skeleton, or suggest
+why a merge inflated. But an assistant can produce confident, plausible SAS that runs on the wrong rows or
+inverts an odds ratio, so **verification is the load-bearing line**: you confirm every claim against the log
+and the locked counts before it enters your report. Record what you used on any graded work.
+
+| Tool | Purpose | Verification |
+|------|---------|--------------|
+| AI assistant (note version/date) | Explain an ODS PDF/RTF option or a `%INCLUDE` structure | Confirm the report opens **and** closes — the log shows both `Writing ODS PDF … to DISK` and `ODS PDF printed N pages`; open the file |
+| AI assistant | Draft the clean → join skeleton | Rerun and check the counts land on **210 → 200** and inner join **594** (left **596**); reject any draft whose log shows a different count |
+| AI assistant | Suggest a fix for a `MERGE … repeats of BY values` warning | Confirm the corrected join returns **594** rows, not the inflated cross-product; confirm the WARNING is gone |
+| AI assistant | Explain a PROC LOGISTIC odds ratio | Confirm the log modeled `goal_met='1'` with `usual_care` reference; confirm OR **1.78** (CI 1.28–2.47); restate that an OR is **not** a risk ratio |
+| AI assistant | Draft the written conclusion | Check every number against the locked study; confirm it names the observational/associational caveat and "significant ≠ important" |
+
+The discipline is the same one the whole course turns on: an AI can write the code, but **you** confirm the row
+count, the type, the modeled level, and the caveats — and that you can say *why* each is right.
+
+## Reading and source pointer
+
+For this week's reporting and organization tools, point yourself to the relevant **SAS documentation** pages:
+the **ODS (Output Delivery System)** documentation on the **PDF** and **RTF** destinations (opening, styling,
+and — critically — **closing** a destination); the **`%INCLUDE`** statement and SAS program-organization
+guidance for assembling one runnable program from named files; and **PROC CONTENTS** for verifying variable
+types and dataset counts before you trust output. Because this report reuses earlier procedures, the
+**PROC SQL** join documentation (inner vs left join), **PROC TTEST**, and **PROC LOGISTIC** pages remain the
+authoritative references for exact option syntax and the modeled-level controls. Read these as a *reading
+pointer* — find the statement, the option, the usage note — not as something to copy. "Learning to check the
+documentation" is itself a course skill.
+
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc. (The
+SAS documentation is proprietary, Tier 3 — linked and cited here in the course's own words, never reproduced.)
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and **every numeric value on this page are hand-authored,
+synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The course **SAS
+execution/output gate is BLOCKED**; a rendered code block or a typed listing is *not* evidence that the program
+runs or that the numbers are right. The load-bearing values here — the clean-and-dedup chain **210 raw → 208
+after test-row delete → 200 unique**; the cleaned frequencies **sex F104/M96, arm coaching100/usual_care100,
+site North70/Central66/South64**; the join counts **inner 594 / left 596**; the `systolic_bp` summary
+(**mean 128.4, SD 14.2, min 96, median 127, max 178**, over **n=594**) and
+**PROC TTEST** (baseline slice **n=198**; coaching 125.9 vs usual_care 130.8; diff −4.9, 95% CI (−7.2, −2.6);
+$t = -4.27$, df 196, $p < .0001$); the **PROC LOGISTIC** odds ratios (baseline slice **n=198**; arm 1.78, 95% CI
+1.28–2.47, $p = 0.0006$; age 0.98; BMI 0.93; C-statistic 0.69); the `steps_k` mean **7.45**; and the seed **`streaminit(20260824)`** — are the locked
+synthetic `wellness-program study` figures, drafted "as if run" for this draft site and checked only for
+internal and narrative consistency. The study is **synthetic and observational** — not real health data, and
+not causal; an odds ratio is not a risk ratio. Do not treat any value here as a confirmed reference until the
+human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Portfolio connection
+
+This week is the hinge between the course and your **portfolio**. The reproducible analysis report you build
+here — one program, top to bottom, with checked row counts, named assumptions, ODS output, a verification-notes
+block, and a written conclusion that names what the analysis does and does **not** show — is the exact artifact
+the final analytics project asks for, and the exact artifact worth keeping in a professional **portfolio**.
+When a future reader (a reviewer, a colleague, a hiring manager) opens your `wellness_report.sas` and reruns it,
+the value is not that it produces output — anything produces output — but that it produces the *same* output,
+*traceably*, and tells them honestly what it shows. A portfolio piece that someone else can rerun and verify is
+worth more than a folder of screenshots, because it demonstrates the one thing this whole course is about:
+reliable, traceable, verifiable analysis. Build the skeleton here so it is ready for the project in week 15 —
+and for the portfolio you carry past this course.
+
+## See also
+
+- Previous week: [Week 13 — Simulation and random generation](week-13-simulation-and-random-generation.qmd) —
+  the `streaminit(20260824)` seed convention and the power ≈ 0.99 / Type I ≈ 0.05 results this report would
+  reproduce.
+- Next week: [Week 15 — Final analytics project and review](week-15-final-analytics-project-and-review.qmd) —
+  the whole workflow as one picture; the reproducible report skeleton becomes the project deliverable.
+- [Week 6 — PROC SQL and joins](week-06-proc-sql-and-joins.qmd) — the inner-594 vs left-596 join check this
+  report depends on.
+- [Week 8 — Visualization and ODS output](week-08-visualization-and-ods-output.qmd) — opening, closing, and
+  styling the ODS destinations the report writes to.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — `libname`, `%INCLUDE`, ODS destination vs
+  object, the read-the-log / check-the-rows discipline.
+- [PROC reference](../resources/proc-reference.qmd) — PROC MEANS, TTEST, GLM, REG, and LOGISTIC side by side.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR,
+  confirming row counts, and checking types and NMISS before you trust a report.

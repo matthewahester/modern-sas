@@ -1,0 +1,140 @@
+# Modern SAS for Statistical Analytics — public Quarto course site (assembled course materials).
+# Sibling of matthewhester.com; intended to live at /modern-sas/ under that domain.
+# Layout/theme aligned to the matthewhester.com course family (cosmo + styles.css, dark navbar,
+# floating sidebar, right-side TOC). site-url set for the combined deploy; this repo does not
+# self-deploy (no CI here — the hub workflow assembles the courses).
+# Boundary: this is the PUBLIC surface. Private build state (_state/), source governance (source_text/),
+# assessment shadows (assessment_shadow/), run reports (run_reports/), and accessibility evidence
+# (accessibility/) are NOT rendered.
+project:
+  type: website
+  output-dir: _site
+  # RENDER ALLOW-LIST (docs/08 §2 boundary hazard; docs/26 §6). Fails safe — only the public sections below
+  # render into _site/. Every private dir (_state/ underscore-skipped, plus source_text/, assessment_shadow/,
+  # run_reports/, accessibility/) is excluded. NOTE: a bare "*.qmd" matches RECURSIVELY in Quarto 1.8.26 and
+  # could leak nested private .qmd; list the three public root pages explicitly and negate private dirs as
+  # belt-and-suspenders (docs/08 §2, docs/26 §6).
+  render:
+    - index.qmd
+    - syllabus.qmd
+    - schedule.qmd
+    - notes/*.qmd
+    - labs/*.qmd
+    - resources/*.qmd
+    - "!_state/"
+    - "!source_text/"
+    - "!assessment_shadow/"
+    - "!run_reports/"
+    - "!accessibility/"
+
+website:
+  title: "Modern SAS for Statistical Analytics"
+  site-url: https://matthewhester.com/modern-sas/
+  description: |
+    Public-facing course materials for Modern SAS for Statistical Analytics —
+    an assembled course site (notes, labs, and resources) curated by Matt Hester.
+  open-graph: true
+  navbar:
+    pinned: true
+    background: dark            # black top bar — the family signature
+    logo: assets/icon.png
+    logo-alt: "Modern SAS for Statistical Analytics — a green malachite course mark"
+    left:
+      - href: index.qmd
+        text: Home
+      - href: syllabus.qmd
+        text: Syllabus
+      - href: schedule.qmd
+        text: Schedule
+  sidebar:
+    style: floating
+    collapse-level: 2
+    contents:
+      - section: "Notes"
+        href: notes/index.qmd
+        contents:
+          - href: notes/index.qmd
+            text: "Notes overview"
+          - section: "Part I — The SAS analytics environment (Wk 1–3)"
+            contents:
+              - href: notes/week-01-what-sas-is-for-now.qmd
+                text: "1 — What SAS is for now"
+              - href: notes/week-02-sas-environment-and-project-setup.qmd
+                text: "2 — Environment & project setup"
+              - href: notes/week-03-libraries-datasets-variables-formats.qmd
+                text: "3 — Libraries, datasets, variables, formats"
+          - section: "Part II — Building & validating data (Wk 4–6)"
+            contents:
+              - href: notes/week-04-data-step-logic.qmd
+                text: "4 — DATA step logic"
+              - href: notes/week-05-importing-cleaning-validating.qmd
+                text: "5 — Importing, cleaning & validating"
+              - href: notes/week-06-proc-sql-and-joins.qmd
+                text: "6 — PROC SQL & joins"
+          - section: "Part III — Summaries, output & statistical procedures (Wk 7–11)"
+            contents:
+              - href: notes/week-07-summaries-tables-and-midterm.qmd
+                text: "7 — Summaries, tables (midterm)"
+              - href: notes/week-08-visualization-and-ods-output.qmd
+                text: "8 — Visualization & ODS output"
+              - href: notes/week-09-ttests-anova-group-comparisons.qmd
+                text: "9 — t-tests, ANOVA & group comparisons"
+              - href: notes/week-10-linear-regression.qmd
+                text: "10 — Linear regression"
+              - href: notes/week-11-logistic-regression-categorical.qmd
+                text: "11 — Logistic regression & categorical outcomes"
+          - section: "Part IV — Shaping, simulation & reproducible reporting (Wk 12–15)"
+            contents:
+              - href: notes/week-12-reshaping-and-merging.qmd
+                text: "12 — Reshaping & merging data"
+              - href: notes/week-13-simulation-and-random-generation.qmd
+                text: "13 — Simulation & random generation"
+              - href: notes/week-14-reproducible-sas-analysis-report.qmd
+                text: "14 — Reproducible SAS analysis report"
+              - href: notes/week-15-final-analytics-project-and-review.qmd
+                text: "15 — Final analytics project & review"
+      - section: "Labs"
+        href: labs/index.qmd
+        contents:
+          - href: labs/index.qmd
+            text: "Labs overview"
+          - href: labs/lab-04-build-and-validate-a-data-step.qmd
+            text: "Lab 4 — Build & validate a DATA step"
+          - href: labs/lab-06-proc-sql-joins-and-relationship-checks.qmd
+            text: "Lab 6 — PROC SQL joins & relationship checks"
+          - href: labs/lab-10-linear-regression-and-diagnostics.qmd
+            text: "Lab 10 — Linear regression & diagnostics"
+          - href: labs/lab-13-simulation-and-repeated-analyses.qmd
+            text: "Lab 13 — Simulation & repeated analyses"
+      - section: "Resources"
+        href: resources/index.qmd
+        contents:
+          - href: resources/index.qmd
+            text: "Resources overview"
+          - href: resources/sas-workflow-glossary.qmd
+            text: "SAS workflow glossary"
+          - href: resources/proc-reference.qmd
+            text: "PROC reference"
+          - href: resources/log-and-verification-guide.qmd
+            text: "Log & verification guide"
+          - href: resources/sas-access-setup.qmd
+            text: "SAS access & project setup"
+  page-footer:
+    left: "© 2026 Matt Hester · Modern SAS for Statistical Analytics"
+    center: "[Matt Hester · matthewhester.com](https://matthewhester.com/)"
+    right: "Built with [Quarto](https://quarto.org)"
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+    toc-location: right
+    anchor-sections: true
+    smooth-scroll: true
+    link-external-newwindow: true
+    fontsize: 1.05em
+    mainfont: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+    monofont: "JetBrains Mono, Consolas, Menlo, monospace"
+# SAS is shown as static, non-executed ```sas fences in this diagnostic; logs and PROC output are shown as
+# typed synthetic listings. No SAS engine is invoked, so the render is deterministic and SAS-free.

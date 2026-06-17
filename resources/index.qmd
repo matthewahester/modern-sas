@@ -1,0 +1,100 @@
+---
+title: "Resources"
+subtitle: "Workflow vocabulary, a PROC reference, the log guide, and SAS access"
+page-type: orientation
+verified: false
+toc: true
+---
+
+These are the reference pages to keep open while you read the week notes and work the labs — the SAS workflow
+vocabulary, the procedures laid side by side, the guide to reading the log and verifying output, and how to
+get into a SAS environment and organize a project. They support the throughline of the whole course: move from
+messy data to documented, rerunnable analytic results, and **read the log, check the row counts, and verify
+before you trust output**.
+
+::: {.callout-important}
+**SAS is shown here, not executed.** Across this site every SAS program, every log excerpt, and every PROC
+output table is **hand-authored and synthetic** — SAS is proprietary and is **not run** in this build. Code
+appears as static, syntax-highlighted ` ```sas ` text; logs and output appear as typed listings labelled
+"synthetic." A rendered listing is not evidence the code ran or that the numbers are right. Every page carries
+`verified: false` and a verification-status section.
+:::
+
+## The reference pages
+
+- **[SAS workflow glossary](sas-workflow-glossary.qmd)** — the vocabulary the whole course leans on: *library*
+  and *libref*, *dataset* (`libref.name`), *observation* versus *variable*, *label*, *format* versus
+  *informat*, the *PDV*, character versus numeric, missing values (`.` and blank `" "`), and the log levels
+  NOTE / WARNING / ERROR — each with a plain-language meaning and why it is load-bearing.
+- **[PROC reference](proc-reference.qmd)** — the course procedures placed side by side: PROC IMPORT, CONTENTS,
+  FREQ, MEANS, UNIVARIATE, SQL, SORT, TTEST, GLM, REG, LOGISTIC, TRANSPOSE, SGPLOT, SURVEYSELECT, and the ODS
+  destinations — what each is for, what it expects, what it returns, and the verification check to run after
+  it. A pointer to which procedure answers which analytic question, not a syntax dump.
+- **[Log & verification guide](log-and-verification-guide.qmd)** — how to read the SAS log as primary output:
+  the NOTE / WARNING / ERROR distinction, the load-bearing lines to check (observations read, observations
+  created, a many-to-many MERGE warning, a bad informat, a silent character-to-numeric conversion), and the
+  verification habits — confirm row counts before and after a join, check variable types, look at `NMISS`,
+  and ask "could someone else rerun and verify this?"
+- **[SAS access & project setup](sas-access-setup.qmd)** — how to reach a SAS environment (SAS Studio via SAS
+  OnDemand for Academics, SAS Viya for Learners, SAS Skill Builder for Students, or a university-supported
+  install) and how to organize an analysis project — a `libname` to a permanent data folder, `options` you
+  rely on, named program files, and a verification-notes section. This is also where the **SAS-access caveat**
+  lives: the course-designated SAS environment is a syllabus placeholder, and a provisioned student account is
+  not yet confirmed.
+
+## How to use these together
+
+Read them in the order a workflow actually unfolds. Start with the **glossary** so the vocabulary on every
+page lands — knowing that a *date is a numeric value displayed with a format*, or that `participant_id` is
+numeric while `sex` is character, saves you from the classic traps. Reach for the **PROC reference** when you
+need to pick the procedure that fits the question: a two-group comparison of `systolic_bp` by `arm` is a PROC
+TTEST; three sites is a PROC GLM / ANOVA; a 1/0 outcome like `goal_met` is a PROC LOGISTIC. Keep the **log &
+verification guide** open whenever you run a step, because the log — not the output window — is where SAS tells
+you the truth, and the row count is where a broken join confesses (the recurring 594-row inner join versus the
+596-row left join). Visit **SAS access & project setup** once at the start to get into an environment and lay
+out your folders, then again whenever you organize a new analysis.
+
+Everything on these pages uses the same recurring teaching dataset as the week notes — the synthetic,
+observational **wellness-program study** ("RiverCity Wellness," seed `streaminit(20260824)`): **210** raw
+participant rows cleaned to **200** unique participants, joined to **594** screening rows. It is **not real
+health data**, and any result shown — a mean, a t statistic, an odds ratio — is invented for teaching.
+
+## Reading and source pointer
+
+These reference pages point you toward the official **SAS documentation** (documentation.sas.com,
+support.sas.com) for the procedures and options the course uses, and — on the statistical-procedure weeks (9,
+10, 11) — toward the open **Introduction to Modern Statistics (IMS), 2nd ed.** (Çetinkaya-Rundel & Hardin, CC
+BY-SA 3.0, openintro-ims.netlify.app) for the statistical background behind t-tests, ANOVA, regression, and
+logistic regression. "Learning to check the documentation" is itself a course skill: each page names the
+relevant SAS doc page as a reading pointer, in the course's own words, so you practise finding the authoritative
+syntax yourself. These notes are the course's own synthesis: grounded in the SAS documentation and open
+statistics references, but not copied from them. SAS® and all SAS Institute product names are the property of
+SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** This is an orientation page, so it carries no statistical results of its own; the
+load-bearing numbers it references — **210** raw rows, **200** cleaned participants, **594** screening rows,
+the **594** inner-join versus **596** left-join counts, and the synthetic seed `streaminit(20260824)` — are
+the locked values of the **wellness-program study** and are **hand-authored, synthetic, and were NOT run**. SAS
+is proprietary and is not executed in this build, so any SAS code, log line, or output table shown on the pages
+this links to is static teaching material, not a verified run. The course **SAS execution/output gate is
+BLOCKED**; a rendered code block or typed listing is not evidence the code runs or the numbers are right. Do
+not treat any value as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- The week notes, where each procedure is introduced in workflow order — start at
+  [Week 1 — what SAS is for now](../notes/week-01-what-sas-is-for-now.qmd).
+- The companion labs: [Lab 4 — build and validate a DATA step](../labs/lab-04-build-and-validate-a-data-step.qmd),
+  [Lab 6 — PROC SQL joins and relationship checks](../labs/lab-06-proc-sql-joins-and-relationship-checks.qmd),
+  [Lab 10 — linear regression and diagnostics](../labs/lab-10-linear-regression-and-diagnostics.qmd),
+  and [Lab 13 — simulation and repeated analyses](../labs/lab-13-simulation-and-repeated-analyses.qmd).

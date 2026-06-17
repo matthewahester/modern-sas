@@ -1,0 +1,139 @@
+---
+title: "Labs"
+subtitle: "The hands-on SAS analytics-workflow strand — four labs across the term"
+page-type: orientation
+verified: false
+toc: true
+---
+
+The labs are the course's hands-on SAS workflow strand. They run alongside the week notes, not instead of
+them: where a note develops a workflow idea and interprets it, a lab lets you *do* it — build and validate a
+DATA step, join two tables and check the row counts, fit a regression and read its diagnostics, simulate the
+study many times and watch a sampling distribution form. Computation here is always in service of a reliable,
+traceable analysis, never the other way around. The recurring question on every lab is the same one that runs
+through the whole course: *would someone else be able to understand, rerun, and verify this?* There are four
+labs across the term, each tied to a specific week.
+
+::: {.callout-important}
+**The SAS code on this site is shown for study and is NOT executed here.** SAS is proprietary and is not run
+in this build environment, so every SAS program, every log excerpt, and every PROC output table you see in the
+labs is **hand-authored and synthetic** — drafted "as if run," not produced by a real session. A
+syntax-highlighted code block proves nothing about whether the code runs or whether the numbers are right. You
+run the code yourself in your own provisioned SAS session; see [SAS access &
+setup](../resources/sas-access-setup.qmd) to get an account and organize your project. All load-bearing numbers
+are `verified: false` pending a human/SAS-run sign-off in the course's private notation and verification ledger §5.
+:::
+
+## How a lab works
+
+Every lab is built the same way, so you always know where you are:
+
+1. **Goal.** What the workflow task is meant to show, stated in one or two sentences and linked back to the
+   companion week note.
+2. **Setup.** The small bit of preparation you need — the `libname`, the study slice, the seed call
+   `streaminit(20260824)` where anything is random, and the analytic question.
+3. **Steps.** The analysis itself, broken into numbered steps, each with **shown SAS code** in a plain
+   ```` ```sas ```` fence (static, non-executed), followed by the **synthetic log or PROC output** as a typed
+   listing, and a one-sentence interpretation that names the workflow move — what was read, what was created,
+   what the log confirms.
+4. **Verify.** A check that the result is what you expected: read the log for `NOTE`/`WARNING`/`ERROR`, confirm
+   the row counts (before and after a join), check variable types and `NMISS`, and sanity-check the range. This
+   is the moment where the computation and the reasoning meet — the heart of the course.
+5. **AI use note.** A short record of any AI help, with three parts — Tool, Purpose, and Verification — where
+   verification (how you checked the output yourself, against the log and the expected counts) is the
+   load-bearing field.
+
+A note on the code: in these labs the SAS programs are **shown for study**, written with a fixed seed
+(`call streaminit(20260824)`) wherever anything is random so the work is reproducible. They are **not executed
+on this site** — you run them in your own SAS session, which is exactly how you will work on the labs. The
+shown logs and output are synthetic stand-ins for what such a run would print, so you can practice *reading*
+them before you have a session in front of you. See [SAS access & setup](../resources/sas-access-setup.qmd) for
+how to get a SAS environment and organize your files.
+
+## The data
+
+Every lab uses the same recurring teaching dataset, the **wellness-program study** ("RiverCity Wellness") — a
+**synthetic, observational** screening program, **not real health data**. It is two related tables joined by
+`participant_id`: `participants` (one row per enrolled person — **200** unique after cleaning **210** raw rows)
+and `screenings` (one row per visit — **594** rows for the **198** participants who were screened three times).
+Two enrolled participants have no screenings, which is exactly why an inner join returns **594** rows and a
+left join returns **596** — the recurring "check your row counts" object. Because the synthetic arms are not
+described as randomized, every group difference is **associational, not causal**, and an odds ratio is **not** a
+risk ratio. The data are **synthetic; seed `streaminit(20260824)`**, and every shown statistic is
+`verified: false`.
+
+## The labs
+
+The four labs accompany the workflow-heavy weeks, spaced across the term so each lands when the matching idea
+is fresh:
+
+- **Lab 4 — Build & validate a DATA step.** Create, clean, and subset the `participants` table in one DATA
+  step: coerce the `age = 199` typo to missing, handle the **12** blank `sex` values, drop the test and
+  duplicate rows, and read the log to confirm **210** observations in and **200** out — then verify the cleaned
+  frequencies (`sex` F 104 / M 96). (Accompanies [Week 4 — DATA step
+  logic](../notes/week-04-data-step-logic.qmd).) → [open the lab](lab-04-build-and-validate-a-data-step.qmd)
+- **Lab 6 — PROC SQL joins & relationship checks.** Join `participants` to `screenings` on `participant_id`,
+  compare an inner join (**594** rows) with a left join (**596** rows), and learn to *expect* a row count and
+  check it — surfacing the 2 unscreened participants instead of losing them silently. (Accompanies [Week 6 —
+  PROC SQL & joins](../notes/week-06-proc-sql-and-joins.qmd).) → [open the
+  lab](lab-06-proc-sql-joins-and-relationship-checks.qmd)
+- **Lab 10 — Linear regression & diagnostics.** Fit `systolic_bp = age baseline_bmi` with PROC REG
+  (R² = 0.214, RMSE = 12.6), read the parameter estimates, and check the residual diagnostics before you trust
+  the fit. (Accompanies [Week 10 — Linear regression](../notes/week-10-linear-regression.qmd).) → [open the
+  lab](lab-10-linear-regression-and-diagnostics.qmd)
+- **Lab 13 — Simulation & repeated analyses.** Use `call streaminit(20260824)` and the `RAND` function to
+  repeat the study many times: simulate under the arm effect to estimate power (≈ 0.99), simulate under the
+  null to check the Type I rate (≈ 0.05), and watch the sampling distribution of the mean `systolic_bp` form
+  (SE ≈ 0.58). (Accompanies [Week 13 — Simulation & random
+  generation](../notes/week-13-simulation-and-random-generation.qmd).) → [open the
+  lab](lab-13-simulation-and-repeated-analyses.qmd)
+
+Several workflow moves get a full hands-on treatment inside the week notes themselves, in the same shown-code
+style — importing and validating (Week 5), summary procedures (Week 7), ODS reporting (Week 8), the t-test and
+ANOVA (Week 9), logistic regression (Week 11), and assembling the whole pipeline into one reproducible report
+(Week 14). The four labs above are the dedicated, step-by-step practice sessions.
+
+## What to read first
+
+Before the first lab, get a SAS environment and learn the conventions the labs assume:
+
+- [SAS access & setup](../resources/sas-access-setup.qmd) — how to get a provisioned SAS account (SAS OnDemand
+  for Academics / Viya for Learners) and organize your project folders and `libname`. **Note the access caveat
+  there:** a student-accessible SAS account is a syllabus placeholder in this build, so confirm yours is live
+  before you start.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, libref, dataset, observation,
+  variable, format vs informat, the PDV, and the log vocabulary (`NOTE` / `WARNING` / `ERROR`).
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — how to read the log and what to
+  check after each step (row counts, types, `NMISS`).
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS programs, log excerpts, and every numeric value referenced on this page — the raw
+**210** and cleaned **200** participant counts, the **594**-row screening table, the inner-join **594** vs
+left-join **596** counts, the cleaned `sex` frequencies (F 104 / M 96), the regression R² = 0.214 and
+RMSE = 12.6, and the simulation summaries (power ≈ 0.99, Type I ≈ 0.05, SE ≈ 0.58) — are **hand-authored,
+synthetic, and were NOT run**. SAS is proprietary and is not executed in this build, so the course **SAS
+execution/output gate is BLOCKED**: a rendered code block or typed listing is not evidence that the code runs
+or that the numbers are right. Do not treat any value here as a confirmed reference until the human/SAS-run
+sign-off in the course's private notation and verification ledger §5 is complete. The data are **synthetic; seed
+`streaminit(20260824)`**, the study is **observational** (group differences are associational, not causal), and
+an odds ratio is **not** a risk ratio.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- [SAS access & setup](../resources/sas-access-setup.qmd)
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd)
+- [Log & verification guide](../resources/log-and-verification-guide.qmd)
+- [Procedure reference](../resources/proc-reference.qmd)
+- [Lab 4 — Build & validate a DATA step](lab-04-build-and-validate-a-data-step.qmd)
+- [Lab 6 — PROC SQL joins & relationship checks](lab-06-proc-sql-joins-and-relationship-checks.qmd)
+- [Lab 10 — Linear regression & diagnostics](lab-10-linear-regression-and-diagnostics.qmd)
+- [Lab 13 — Simulation & repeated analyses](lab-13-simulation-and-repeated-analyses.qmd)

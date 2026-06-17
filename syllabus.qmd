@@ -1,0 +1,252 @@
+---
+title: "Syllabus (public companion)"
+subtitle: "Orientation and course shape — Blackboard is authoritative for graded specifics"
+verified: false
+toc: true
+---
+
+::: {.callout-important}
+This public page is an **orientation companion** to the syllabus, not the operational syllabus
+itself. It describes the *shape* of **STAT 44203 — Modern SAS for Statistical Analytics** in
+qualitative terms. It carries no numeric grade weights, no due dates, and no submission rules. For
+everything that counts toward your grade — exact weights, deadlines, policies, and submissions —
+**Blackboard (the LMS) is authoritative**. If this page and Blackboard ever disagree, follow
+Blackboard.
+:::
+
+## Course description
+
+Modern SAS for Statistical Analytics treats SAS as a **professional statistical analytics
+environment** — an ecosystem for moving from messy data to documented, defensible analytic results —
+not as "just a language for running procedures." The throughline of the whole course is the
+**analytics workflow**: set up the SAS environment and a project, point a library at your data, read
+it in with the DATA step, **read the log**, import and clean and validate, join tables and check the
+row counts, summarize, send report-ready output to ODS, run statistical procedures, reshape and
+merge, simulate, and finally assemble a single reproducible program another person could rerun.
+Syntax is always in service of that workflow, never the other way around.
+
+The course's soul is **reliability, traceability, and verification**. Every analysis on this site is
+followed by what the log should say and a verification check — row counts before and after a join, a
+variable-type confirmation, an `NMISS` count, a sanity range. The recurring test is one sentence:
+*would someone else be able to understand, rerun, and verify this?* You will also learn to state what
+an analysis does and does **not** show — that "statistically significant" is not "practically
+important," that an odds ratio is not a risk ratio, and that observational data are not causal.
+
+::: {.callout-note}
+A note on how SAS appears on this site. SAS is proprietary software, and on this site
+every SAS program, log excerpt, and procedure output is shown as **static, syntax-highlighted code
+and hand-authored synthetic listings** — none of it is executed here. You run SAS yourself in the
+course-designated environment, which is exactly how you will work on the homework and labs. See
+[Software and reproducibility](#software-and-reproducibility) below.
+:::
+
+## Who it is for
+
+This course assumes a **prior introductory statistics course** or comparable preparation: you should
+be comfortable with variables and data tables, summary statistics, distributions, correlation, simple
+regression, confidence intervals, hypothesis tests, and p-values at an introductory level. **No prior
+SAS experience is required** — the course builds SAS syntax gradually from the environment up,
+starting with what a library and a DATA step are. Prior experience with R, Python, SQL, or
+spreadsheets is helpful but not assumed. The main expectation is willingness to work carefully: write
+and run programs, **read the log**, check your data before you trust output, and explain analytic
+conclusions in plain words.
+
+## Learning outcomes
+
+By the end of the course, a successful student will be able to:
+
+- Describe SAS as a professional statistical analytics environment and name the stages of a complete
+  analytics workflow, from messy input to a documented, reproducible result.
+- Set up the SAS environment and an organized project, assign a `libname` to a permanent library, and
+  run a first program that produces a log and output.
+- **Read the SAS log** fluently — distinguish `NOTE`, `WARNING`, and `ERROR`, and treat the log as
+  primary output rather than an afterthought.
+- Work with libraries, datasets, observations, and variables, and set variable attributes — labels,
+  formats for display, and informats for reading input (so a character date becomes a real SAS date).
+- Distinguish **character from numeric** variables and explain why that distinction is load-bearing,
+  including the silent type conversions the log warns about.
+- Write DATA step logic — `IF/THEN`, subsetting, derived variables — and handle **missing values**
+  correctly, including the classic comparison trap and the use of `NMISS`.
+- Import external data and **clean and validate** it: detect duplicates, impossible values, and bad
+  informats, and confirm the row count goes from raw to clean as expected.
+- Join tables with PROC SQL — and check the output **row count** against what you expect every time
+  (the inner-join vs left-join teaching object).
+- Produce summaries and tables with PROC MEANS, PROC FREQ, and PROC UNIVARIATE, and read `N` vs
+  `NMISS` and the mean of a 0/1 variable as a proportion.
+- Send report-ready output to ODS destinations (HTML, PDF, RTF) and build a simple graph with PROC
+  SGPLOT.
+- Run and interpret a **two-group comparison** (PROC TTEST) and a **multi-group comparison** (PROC
+  GLM/ANOVA), stating the assumptions before interpreting the result.
+- Fit and interpret a **linear regression** (PROC REG) — coefficients, $R^2$, RMSE — and read basic
+  diagnostics.
+- Fit and interpret a **logistic regression** (PROC LOGISTIC) for a binary outcome, stating which
+  level is modeled and that an **odds ratio is not a risk ratio**.
+- **Reshape and merge** data (PROC TRANSPOSE, DATA step `MERGE`), recognize the many-to-many merge
+  bug, and validate the result.
+- Use **simulation** with `call streaminit(20260824)` and `RAND` to study power, Type I error, and a
+  sampling distribution, and seed any random work reproducibly.
+- Assemble a **reproducible SAS analysis report** — one program top to bottom, named files, a
+  verification-notes section — and **interpret results responsibly**: significance is not importance,
+  association is not causation, and a rendered listing is not a verified run.
+
+## Weekly rhythm
+
+This is an in-person lecture/lab course meeting three days a week (MWF), and each day has a settled
+role:
+
+- **Monday — concept + syntax (checkpoint).** We introduce the week's workflow idea and the SAS
+  syntax that serves it, work an example, and close with a short workflow checkpoint.
+- **Wednesday — build + debug.** We build the week's step hands-on: write code, **read the log**,
+  debug a `NOTE`/`WARNING`/`ERROR`, and inspect the output — the day the verification habits get
+  practiced.
+- **Friday — skill check + applied analytics.** A short skill check on recent material, then an
+  applied analytics task on the recurring study — a piece of the workflow carried end to end.
+
+This rhythm is the *plan*; the authoritative weekly schedule, including any shifts (for example the
+Labor Day adjustment and the fall-break window), lives in Blackboard and on the
+[Schedule](schedule.qmd) page.
+
+## Assessment shape (indicative — not a contract)
+
+The table below conveys the **relative emphasis** of each graded category in qualitative terms only.
+It is **not** a grading contract: it carries no percentages and no point values, and the actual
+weights live in Blackboard.
+
+| Category | Rough emphasis |
+|----------|----------------|
+| SAS workflow checkpoints | small |
+| Weekly skill checks | small |
+| SAS homework | the largest single category |
+| Analytics labs | small–moderate |
+| Midterm practical | moderate |
+| Final analytics project | moderate |
+| Final practical | moderate |
+
+Read this as a picture of *where the weight sits*: regular SAS homework is the backbone of the grade;
+the midterm practical, the final analytics project, and the final practical each carry moderate
+weight; the analytics labs sit in the middle; and the smaller pieces — the Monday workflow
+checkpoints and the Friday skill checks — add up around them. The **midterm practical** is an
+in-class, hands-on SAS practical (it covers the environment, project setup, libraries, datasets,
+variable attributes, the DATA step, importing, cleaning, validation, PROC SQL, summaries, and
+reporting); the **final analytics project** carries the full workflow on the recurring study from raw
+data to a reproducible report; the **final practical** is a timed hands-on exercise. For the exact
+weighting and the rules of each, consult Blackboard.
+
+## Software and reproducibility
+
+We use **SAS** through the **course-designated SAS environment** — SAS Studio via SAS OnDemand for
+Academics, SAS Viya for Learners, SAS Skill Builder for Students, or a university-supported SAS
+installation. The specific provisioned environment and access steps are a **syllabus placeholder
+confirmed in Blackboard**; the [SAS access & project setup](resources/sas-access-setup.qmd) resource
+page collects the access path and the project-organization conventions once they are settled.
+
+::: {.callout-warning}
+**SAS access is required and is being finalized.** This course depends on a working,
+student-accessible SAS account in the designated environment. Until that access is confirmed for you
+in Blackboard, you cannot run the programs yourself. Watch Blackboard for the access announcement,
+and set up your account as soon as it is available.
+:::
+
+Every analysis in this course is written so it can be **reproduced**: a single SAS program that runs
+top to bottom with no manual point-and-click, an assigned `libname`, the `options` you rely on, a
+fixed simulation seed (`call streaminit(20260824)`), named output files, and a short
+verification-notes section. The same program should yield the same result for anyone who reruns it. A
+result you cannot rerun — or whose log you never read — is a result on trust alone.
+
+As noted above, the SAS code, logs, and output **shown on this public site are static and synthetic**
+— typed for teaching, not executed here — so the site renders deterministically and SAS-free. The
+numbers in the worked examples come from a single recurring synthetic study (RiverCity Wellness, seed
+`streaminit(20260824)`) and are flagged on every page; they are not real health data and carry
+`verified: false`. You do the real running in your own SAS session.
+
+## AI use (summary)
+
+Generative AI tools may be used as a **study and workflow aid** — to explain a SAS concept a second
+way, generate practice tasks, help debug your **own** SAS program, or walk through a similar example.
+They may **not** produce work you submit as your own, complete your homework or project, fabricate
+output or log lines, or replace your responsibility to understand the workflow, and they are
+**prohibited on the practicals and any skill check** unless explicitly allowed.
+
+Because SAS results are so sensitive to data quality, variable type, and how a procedure is
+conditioned, AI output must be **checked carefully**. Many wrong SAS answers come from confusing
+character with numeric, ignoring a `WARNING` in the log, skipping the row-count check after a join,
+treating an odds ratio as a risk ratio, or reading an unexecuted code block as if it had run.
+Whenever you use AI on a graded program, lab, or project component, include a brief **AI Use Note**
+with three labeled lines:
+
+| Field | What to record |
+|-------|----------------|
+| Tool | which assistant you used (with approximate date or version) |
+| Purpose | what you used it for |
+| Verification | how you checked, tested, revised, or validated the output |
+
+**Verification** is the load-bearing line: rerun the program and **read the log**, check the row
+counts and variable types, confirm `NMISS`, compare to class notes, or rewrite the explanation in
+your own words after checking it. You are responsible for every line of code and every sentence of
+interpretation you submit. The full policy lives in Blackboard.
+
+## Materials
+
+You will need:
+
+- **Instructor notes, examples, and SAS workflow guides** — the **primary** course materials, and the
+  spine of this public site: the weekly [Notes](notes/index.qmd), the study [Labs](labs/index.qmd),
+  and the [Resources](resources/index.qmd) (including the
+  [SAS workflow glossary](resources/sas-workflow-glossary.qmd)). These are the course's own synthesis,
+  written for this course.
+- **The course-designated SAS environment** — SAS Studio via SAS OnDemand for Academics, SAS Viya for
+  Learners, SAS Skill Builder for Students, or a university-supported SAS installation, as confirmed
+  in Blackboard. See [SAS access & project setup](resources/sas-access-setup.qmd).
+- **SAS documentation** — the official SAS Institute documentation and tutorials
+  ([documentation.sas.com](https://documentation.sas.com/),
+  [support.sas.com](https://support.sas.com/)), used as a **reference you learn to consult**. It is
+  copyrighted by SAS Institute Inc., all rights reserved; the notes **link and cite** specific pages
+  as reading pointers in the course's own words, never reproducing SAS-doc prose, examples, or
+  figures.
+- *Introduction to Modern Statistics*, 2nd ed. (Çetinkaya-Rundel & Hardin) — a free **optional**
+  review source for the statistical background on the procedure weeks (t-tests, ANOVA, regression,
+  logistic regression), **CC BY-SA 3.0**, at
+  [openintro-ims.netlify.app](https://openintro-ims.netlify.app/). It is **not** a SAS syntax manual.
+- **Blackboard (the LMS)** — for all graded work, dates, and announcements.
+
+*Not used in this course:* Cengage, WebAssign, MyLab, or any paid homework platform. **SAS® and all
+SAS Institute product names are the property of SAS Institute Inc.**
+
+## Where things live
+
+Keep the two homes of the course straight:
+
+- **Blackboard (the LMS)** is the **operational** home: graded SAS workflow checkpoints, weekly skill
+  checks, SAS homework, analytics labs, the midterm practical, the final analytics project, the final
+  practical, all due dates, all submissions, and all grades. It is authoritative.
+- **This public site** is the **public notes** home: the weekly [Notes](notes/index.qmd), the
+  [Labs](labs/index.qmd) as study material, the [Resources](resources/index.qmd), and orientation
+  pages like this one and the [Schedule](schedule.qmd). It is ungraded.
+
+::: {.callout-note}
+This companion exists to orient you. Whenever a graded specific is at stake — a weight, a deadline, a
+policy — go to Blackboard, which is authoritative.
+:::
+
+## Verification & reproducibility status
+
+**verified: false.** This page is an orientation companion, not a verified analysis, and the
+surrounding course site is a draft. The SAS code, log excerpts, and every numeric value
+shown anywhere on this site — including the recurring wellness-program study figures (the 210→200
+cleaning, the 594-row inner join vs the 596-row left join, the PROC MEANS systolic_bp mean 128.4, the
+PROC TTEST $t = -4.27$, the PROC REG $R^2 = 0.214$, the PROC LOGISTIC arm odds ratio 1.78, the
+simulation power ≈ 0.99) — are **hand-authored, synthetic, and were NOT run.** SAS is proprietary and
+is **not executed** in this build, so a rendered, syntax-highlighted code block or a typed listing is
+**not** evidence that the code runs or that the numbers are right. The course **SAS execution/output
+verification gate is BLOCKED**. The data are synthetic (seed `streaminit(20260824)`); the study is
+**observational** (any arm difference is associational, not causal, since the synthetic arms are not
+described as randomized, and an odds ratio is not a risk ratio). No accessibility-compliance claim is
+made. Do not treat any value on this site as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.

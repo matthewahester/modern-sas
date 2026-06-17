@@ -1,0 +1,295 @@
+---
+title: "SAS access and project setup"
+subtitle: "Getting into a SAS environment and organizing a project you can rerun"
+page-type: reference
+verified: false
+toc: true
+---
+
+This page gets you into a **SAS environment** and lays out an analysis **project** the way the whole course
+expects you to work — a `libname` pointing at a permanent data folder, a few `options` you rely on, named
+program files, and a place to keep verification notes. It supports the throughline of the course: move from
+messy data to documented, rerunnable analytic results, and **read the log, check the row counts, and verify
+before you trust output**. No prior SAS experience is assumed — every step is explained as it goes — but the
+goal from day one is a project another person could open, rerun top to bottom, and verify.
+
+::: {.callout-important}
+**On this site SAS is shown, not executed.** Every SAS program, log excerpt, and PROC output table
+across this site is **hand-authored and synthetic** — SAS is proprietary and is **not run** in this build.
+Code appears as static, syntax-highlighted ` ```sas ` text; logs and output appear as typed listings labelled
+"synthetic." A rendered listing is **not** evidence the code ran or that the numbers are right. You run the
+code yourself in your own provisioned SAS session, which is exactly how you will work in the course. Every
+page carries `verified: false` and a verification-status section.
+:::
+
+::: {.callout-warning}
+**The designated SAS environment is a placeholder — confirm it via Blackboard.** The course names several
+academic SAS routes below (SAS OnDemand for Academics, SAS Viya for Learners, SAS Skill Builder for Students,
+or a university-supported install), but the **exact route you will use is to be confirmed in Blackboard (the
+LMS)**, and a provisioned, student-accessible SAS account was **not yet confirmed** when this page was drafted.
+Do not buy or install anything until Blackboard names the supported environment. If this page and Blackboard
+ever disagree, follow Blackboard.
+:::
+
+## Ways to reach a SAS environment
+
+You do not need to install anything heavy to start — most academic routes run **SAS Studio** in a browser, so
+you write code in one pane, read the log in another, and view results in a third. The options below are the
+common academic on-ramps; **which one this course uses is confirmed in Blackboard**, so treat the descriptions
+as orientation, not a purchase decision. Web addresses change, so search the product name rather than trusting
+a memorized URL, and verify the current sign-up path against the official SAS pages.
+
+- **SAS OnDemand for Academics** — a free, cloud-hosted SAS Studio aimed at teaching and learning. You create a
+  SAS Profile, sign in through a browser, and write and run code with nothing installed locally. This is the
+  most common route for a course like this one.
+- **SAS Viya for Learners** — a cloud SAS Viya environment provided for eligible academic use; it also gives
+  you SAS Studio in the browser, with the Viya platform underneath. Eligibility and access are arranged through
+  an institution.
+- **SAS Skill Builder for Students** — a learning portal that bundles student access to SAS software with
+  practice content. Use it as a learning on-ramp; confirm whether it is the *graded* environment for this
+  course in Blackboard.
+- **A university-supported SAS installation** — some campuses provide a licensed desktop SAS (or a managed
+  virtual lab) through IT. If your campus does, the SAS *language and workflow* are the same; only how you open
+  the environment differs.
+
+::: {.callout-note}
+Whatever the route, the **SAS code in this course is the same**. A `libname`, a DATA step, a PROC call, and the
+log read identically in SAS Studio on the cloud or in a desktop install. So learn the workflow once; it
+transfers across every environment above.
+:::
+
+## Opening SAS Studio and running a first program
+
+Once you are signed in to the designated environment, you will see **SAS Studio** with three things that matter
+for everything you do in this course: a **code editor** (where you write and submit a program), the **log**
+(where SAS tells you the truth about what happened — NOTE, WARNING, ERROR), and the **results/output** (where
+tables and any graphs appear). The log is **primary output**: a program can produce a results table and still
+be wrong, so you read the log first, every time.
+
+A minimal first program assigns a library, reads a tiny synthetic table, and prints it. The data here are
+**synthetic; seed `streaminit(20260824)`** and stand in for the course's recurring, **observational**
+**wellness-program study** ("RiverCity Wellness") — not real health data.
+
+```sas
+/* options you rely on at the top of every program */
+options validvarname=v7 nodate nonumber;
+
+/* point a libref at a permanent data folder you control */
+libname well "/home/<your-id>/wellness/data";
+
+/* a tiny synthetic table, just to confirm the environment runs */
+data work.first_check;
+   call streaminit(20260824);          /* fix the stream so a rerun matches */
+   input participant_id age sex $ arm $;
+   datalines;
+1001 54 F coaching
+1002 41 M usual_care
+1003 38 F coaching
+;
+run;
+
+proc print data=work.first_check;
+   title "First check — does my SAS environment run?";
+run;
+```
+
+The synthetic log you should see, and what to confirm in it:
+
+```text
+SAS log (synthetic)
+NOTE: Libref WELL was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: /home/<your-id>/wellness/data
+NOTE: The data set WORK.FIRST_CHECK has 3 observations and 4 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+```
+
+Read it as a workflow move: the first NOTE confirms the **libref assigned** (your folder path resolved), and
+the second confirms **3 observations and 4 variables** were created — exactly the three rows you typed. The
+verification check here is the simplest one in the course: **the row count matches what you expected.** No
+WARNING and no ERROR means the step ran clean. If instead you saw `ERROR: Libname WELL is not assigned`, the
+folder path does not exist yet — create it first (next section), then resubmit.
+
+::: {.callout-note}
+**Why a `libname` and not just `WORK`?** The `WORK` library is **scratch**: SAS empties it when the session
+ends, so anything in `WORK` is gone next time. A `libname` pointing at a real folder gives you **permanent**
+datasets (`well.participants`) that survive the session — which is what you want for a project you intend to
+rerun and verify. Use `WORK` for throwaway intermediate steps, a named `libname` for data you keep.
+:::
+
+## Assigning a `libname` to a data folder
+
+A **library** is just a nickname (a *libref*) for a folder of datasets. You write `well.participants` and SAS
+looks in the folder the libref points at. Two habits keep this reproducible: assign the `libname` near the top
+of the program so the whole program runs top to bottom, and point it at a folder a reader could also use.
+
+```sas
+/* assign once, near the top; everything below refers to well.<name> */
+libname well "/home/<your-id>/wellness/data";
+
+/* later in the program, a permanent dataset lives in that library */
+data well.participants_clean;
+   set well.participants_raw;
+   /* ... cleaning steps go here ... */
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: Libref WELL was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: /home/<your-id>/wellness/data
+NOTE: There were 210 observations read from the data set WELL.PARTICIPANTS_RAW.
+NOTE: The data set WELL.PARTICIPANTS_CLEAN has 200 observations and 8 variables.
+```
+
+Interpret it and name the workflow move: the libref **assigned** to your folder, SAS **read 210 raw rows** and
+**created 200 cleaned rows** — the recurring import-and-clean count of the wellness-program study (210 raw
+participant rows reduce to **200 unique participants** after removing 8 duplicate-`participant_id` rows and 2
+internal test rows). The verification check is to **compare the two counts against what you expected**: 210 in,
+200 out. If the "created" count were 210, no rows were removed and your cleaning logic did nothing — a silent
+failure the log just exposed. Always read the count, not just the absence of an ERROR.
+
+::: {.callout-tip}
+**A date is a number.** When you assign a library and start reading data, remember that a SAS **date** is a
+numeric value displayed with a date format — for example `enroll_date` arrives as the character string
+`"08/24/2026"` and needs the `MMDDYY10.` informat to become a real SAS date. That is a week-3 topic, but it is
+worth knowing on day one that *character versus numeric is load-bearing* in SAS, and the log will warn you when
+a conversion happens.
+:::
+
+## Organizing a project so it reruns
+
+A reproducible analysis is not a pile of files — it is a small, predictable folder layout plus one program that
+runs **top to bottom with no manual point-and-click**. Lay the project out so a reader can open it and find
+everything by where it lives:
+
+- **`data/`** — the permanent datasets your `libname` points at (raw and cleaned kept distinct, e.g.
+  `participants_raw` and `participants_clean`). Never overwrite raw data in place.
+- **`code/`** — your `.sas` program files, named for what they do (`01_import.sas`, `02_clean.sas`,
+  `03_analyze.sas`) so the run order is obvious.
+- **`output/`** — the report-ready tables and any saved ODS output (HTML/PDF/RTF). Generated, not edited by
+  hand.
+- **`logs/`** — saved copies of the SAS log, so you have a record of what the run reported (the counts, any
+  WARNING).
+- **`docs/`** — a short README and your verification notes — what the data are, what was cleaned, what the row
+  counts should be, and what the analysis does and does **not** show.
+
+A first program that documents its own structure looks like this:
+
+```sas
+/* 01_setup.sas — assigns the library and sets options for the whole project */
+options validvarname=v7 nodate nonumber;
+libname well "/home/<your-id>/wellness/data";
+
+/* a verification step you can run any time: what is in the library? */
+proc contents data=well.participants_clean varnum;
+   title "Project check — variables and types in participants_clean";
+run;
+```
+
+```text
+Output (synthetic, not executed)
+                       The CONTENTS Procedure
+
+   Data Set Name   WELL.PARTICIPANTS_CLEAN     Observations          200
+   Member Type     DATA                        Variables               8
+
+   #   Variable          Type       Len
+   1   participant_id    Num          8
+   2   age               Num          8
+   3   sex               Char         1
+   4   site              Char         7
+   5   arm               Char        10
+   6   enroll_date       Num          8
+   7   baseline_bmi      Num          8
+   8   region            Char        12
+```
+
+Interpret it and name the move: PROC CONTENTS is the **type-check** step. It confirms **200 observations and 8
+variables**, and — load-bearing — it confirms `participant_id` is **numeric** while `sex`, `site`, and `arm`
+are **character**, and that `enroll_date` is **numeric** (a date stored as a number). If a column you expect to
+be numeric showed `Char`, PROC MEANS would refuse to summarize it and you would know to fix the type *before*
+trusting any later result. Checking types early is cheaper than chasing a broken procedure later.
+
+::: {.callout-tip}
+**One program, top to bottom.** If your analysis only works when you click things in a certain order, it is not
+reproducible. Keep each `.sas` file runnable start to finish; set the seed (`call streaminit(20260824)`) before
+anything random; and let `01_*`, `02_*`, `03_*` make the order obvious. The recurring test for the whole course
+is: *would someone else be able to open this, rerun it, and verify it?*
+:::
+
+## A verification-notes habit
+
+The single habit that separates a trustworthy project from a fragile one is **writing down what each step
+should report and checking it**. After any step that reads, creates, or joins data, note (a) **what the log
+should say** — the observation counts and the absence of unexpected WARNING/ERROR — and (b) a **verification
+check** — a row count, a type check (PROC CONTENTS), an `NMISS` count, or a sanity range.
+
+The recurring object lesson in this course is the **join row count**. The wellness-program study has two
+tables joined by `participant_id`: **200 participants** and **594 screening rows** (198 participants have 3
+visits each; 2 enrolled participants have 0 screenings). So:
+
+- an **inner join** `participants × screenings` keeps only matched keys → **594 rows**;
+- a **left join** `participants ← screenings` keeps every participant → **596 rows** (the 2 unscreened
+  participants surface with missing screening fields).
+
+If you expected 594 and got 596, you did not make a mistake — you used a **left join**, and the 2 extra rows are
+exactly the unscreened participants the design predicted. The point is not the number; the point is that you
+**checked the count against your expectation** and could explain the difference. A result you cannot rerun and
+explain is a result on trust alone. Keep these expected counts in `docs/` so future-you (and a reader) can
+confirm them.
+
+## A note on AI help
+
+You may use an AI assistant to explain a SAS option or help debug your own code, but you must **check what it
+produces** — run it in your own SAS session, read the log, confirm the row counts and types, and include an
+**AI Use Note** (Tool / Purpose / Verification) on any graded work. An AI can write a `libname` or a PROC SQL
+join that looks right and still returns the wrong row count; the verification step is the load-bearing line.
+AI-suggested SAS is unverified for the same reason everything on this site is: a plausible-looking
+listing is not a verified run.
+
+## Reading and source pointer
+
+For the access-and-environment topics on this page, point yourself to the official **SAS documentation** — the
+**SAS Studio** documentation (getting started, the code/log/results panes, and submitting a program) and the
+**LIBNAME statement** documentation (assigning a libref to a folder) at documentation.sas.com and
+support.sas.com — and to the **SAS OnDemand for Academics** sign-up and getting-started pages for the academic
+access route. "Learning to check the documentation" is itself a course skill, so use these as reading pointers
+and read them in the course's own framing rather than copying them. These notes are the course's own synthesis:
+grounded in the SAS documentation and open statistics references, but not copied from them. SAS® and all SAS
+Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page — the **3**-row first
+check, the **210** raw rows reducing to **200** cleaned participants, the **8** variables and their types, and
+the **594** inner-join versus **596** left-join screening counts of the wellness-program study (seed
+`streaminit(20260824)`) — are **hand-authored, synthetic, and were NOT run.** SAS is proprietary and is not
+executed in this build, so a rendered, syntax-highlighted code block or a typed log/output listing is **not**
+evidence that the code runs or that the numbers are right. The course **SAS execution/output gate is BLOCKED**.
+Do not treat any value here as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete. The data are synthetic and
+**observational** — not real health data, and any difference between arms is associational, not causal.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- The other reference pages: the [SAS workflow glossary](sas-workflow-glossary.qmd), the
+  [PROC reference](proc-reference.qmd), and the [log & verification guide](log-and-verification-guide.qmd).
+- The week note where this setup is taught in workflow order:
+  [Week 2 — SAS environment and project setup](../notes/week-02-sas-environment-and-project-setup.qmd).
+- Where the data come from in the sequence: [Week 1 — what SAS is for now](../notes/week-01-what-sas-is-for-now.qmd)
+  and [Week 5 — importing, cleaning, and validating](../notes/week-05-importing-cleaning-validating.qmd).
+
+---
+
+*This page is a study reference. For graded specifics — deadlines, submissions, and policies — **Blackboard
+(the LMS) is authoritative**.*

@@ -1,0 +1,281 @@
+---
+title: "SAS workflow glossary"
+subtitle: "The SAS vocabulary the whole course leans on, in plain language"
+page-type: reference
+verified: false
+toc: true
+---
+
+Keep this page open while you read the week notes. The course is a **professional SAS analytics workflow** —
+move from messy data to documented, rerunnable results — so most of this vocabulary is about *where data
+lives*, *what type it is*, and *what the log just told you*, not about syntax for its own sake. The single
+discipline that runs through every entry is the course's recurring test: read the log, check the row counts,
+confirm the types, and ask **"could someone else rerun and verify this?"** Where a term shows a number it is
+from the synthetic, observational **wellness-program study** ("RiverCity Wellness," seed
+`streaminit(20260824)`) and is `verified: false` — the SAS execution/output gate is blocked pending a
+human/SAS-run sign-off.
+
+::: {.callout-important}
+**SAS is shown here, not executed.** Every SAS snippet on this page is **static, syntax-highlighted teaching
+code** in a plain ` ```sas ` fence, and every log line or output value is a **typed, hand-authored synthetic
+listing** — SAS is proprietary and is **not run** in this build. A rendered listing is not evidence the code
+ran or that the numbers are right.
+:::
+
+## Where data lives — libraries and datasets
+
+These are the nouns of the SAS environment: a folder of data, the nickname that points at it, and one table
+inside it. Getting these straight is what lets another person open your project and find the same data.
+
+| Term | Plain-language meaning |
+|---|---|
+| **library** | A collection of SAS datasets that live together — in practice, a folder on disk (or a database) that SAS knows about. A `libname` statement creates one. |
+| **libref** | The short *nickname* you assign to a library with `libname`. `libname well "C:/projects/wellness/data";` makes `well` the libref; you then refer to data as `well.participants`. |
+| **`WORK`** | The built-in *scratch* library that SAS clears when the session ends. Use it for temporary steps; use a named libref (a permanent library) for data you want to keep. |
+| **dataset** | One SAS data table, named `libref.name` (two parts: the library, then the member name) — e.g. `well.participants`. A dataset has observations (rows) and variables (columns) plus stored metadata (types, lengths, labels, formats). |
+| **observation** | One **row** of a dataset — one record. In the study, one row of `participants` is one enrolled person; one row of `screenings` is one person *at one visit*. The two tables have different **grains**, so their row counts are not the same. |
+| **variable** | One **column** of a dataset — one measured attribute, e.g. `systolic_bp`. Every variable has a name, a *type* (character or numeric), and a *length*. |
+| **label** | An optional longer, human-readable description attached to a variable (e.g. label `systolic_bp = "Systolic blood pressure (mmHg)"`), shown in output instead of the short name. A label changes display only — never the stored values. |
+
+A quick orientation: a *date is a numeric value displayed with a date format*, so `enroll_date` is a number
+under the hood even though it prints as `24AUG2026`. That fact is load-bearing in Week 3.
+
+```sas
+libname well "C:/projects/wellness/data";   /* a libref pointing at a permanent library */
+/* well.participants is now a dataset: rows = observations, columns = variables */
+```
+
+## What a value is — types, missing, formats
+
+SAS stores every value as one of exactly two types, and how it *reads* a value (informat) is a different job
+from how it *prints* one (format). Most early bugs trace back to a type surprise or a misread missing value.
+
+| Term | Plain-language meaning |
+|---|---|
+| **character vs numeric** | The two — and only two — SAS data types. **Numeric** holds numbers you compute with (`participant_id`, `age`, `systolic_bp`, `goal_met`). **Character** holds text (`sex`, `site`, `arm`, `region`). The type is fixed when the variable is created. A number accidentally stored as text **blocks PROC MEANS** and other math — name the type every time it matters. |
+| **missing value** | A value that is absent. **Numeric missing is a period `.`**; **character missing is a blank `" "`**. Missing **propagates** through arithmetic (any term missing makes the result missing) and sorts as *less than every real value*, so `if x > 5` quietly excludes missing while `if x < 5` quietly includes it — a classic trap. |
+| **`NMISS`** | The count of *missing* values for a variable (the companion to `N`, the count of present values). Always check `NMISS` after cleaning: the study has 12 blank `sex` values, one `age` coerced to missing (the typo 199), and 2 flagged `baseline_bmi = 0`. |
+| **format** | A rule for **displaying** a stored value — `MMDDYY10.` prints a date as `08/24/2026`, `DOLLAR8.2` adds a `$`. A format changes how a value *looks*, never what is *stored*. |
+| **informat** | A rule for **reading** raw input into a stored value — the mirror image of a format. The study's `enroll_date` arrives as the text `"08/24/2026"`; the `MMDDYY10.` *informat* turns that text into a real SAS (numeric) date. Reading: informat in, format out. |
+| **type conversion** | Moving a value between types. `input(char_var, 8.)` reads text into a number; `put(num_var, 8.)` writes a number into text. SAS will sometimes convert *silently* and only **NOTE** it in the log — verify those. |
+
+```sas
+/* the study's enroll_date arrives as character text and needs an informat to become a date */
+enroll_date = input(enroll_date_char, mmddyy10.);  /* read text -> numeric date */
+format enroll_date date9.;                          /* display it as 24AUG2026  */
+```
+
+::: {.callout-note}
+**Synthetic data, seed `streaminit(20260824)`.** The wellness-program study is invented for teaching and is
+**observational** — never a real health finding. Any arm difference is *associational*, not causal (the arms
+are not described as randomized).
+:::
+
+## How a program runs — the DATA step, the PDV, and PROCs
+
+A SAS program is a sequence of *steps*. A **DATA step** builds or reshapes data row by row; a **PROC step** runs
+a packaged procedure. Knowing that a DATA step loops once per observation through the PDV explains most of what
+the log reports.
+
+| Term | Plain-language meaning |
+|---|---|
+| **DATA step** | The block that **creates or transforms a dataset**, one observation at a time: read inputs, run your `if`/`then` logic and assignments, write a row, repeat. Cleaning, subsetting, deriving variables, and merging all happen in DATA steps. Ends with `run;`. |
+| **PDV (program data vector)** | The in-memory "current row" the DATA step works on — one slot per variable. SAS loads a row into the PDV, runs your statements top to bottom, writes the result, then clears and reloads for the next row. An *uninitialized* variable shows up here and triggers a log **WARNING**. |
+| **PROC (procedure)** | A pre-built routine you *call* to do one analytic job — `PROC MEANS`, `PROC FREQ`, `PROC SQL`, `PROC TTEST`. You supply the dataset and options; the PROC produces output. Ends with `run;` (or `quit;` for PROC SQL and PROC DATASETS). |
+| **`run;` / `quit;`** | The statements that **submit** a step. Most steps end with `run;`; the interactive PROCs (PROC SQL, PROC DATASETS) end with `quit;`. A missing `run;` is a common reason a step "doesn't seem to do anything." |
+| **`options`** | Session settings you set once and rely on — e.g. `options validvarname=v7;`. Showing the `options` you depend on is part of a reproducible program: someone rerunning it gets your settings, not their defaults. |
+
+```sas
+data well.clean;                 /* a DATA step: build well.clean one row at a time */
+  set well.raw;                  /* read each observation into the PDV               */
+  if age = 199 then age = .;     /* flag the impossible-age typo as missing          */
+run;                             /* submit the step                                  */
+```
+
+After a step like this, the workflow move is to **read the log for the row count** and confirm the impossible
+values were caught — a rendered step proves nothing until you check what it produced.
+
+## Reading the log — NOTE / WARNING / ERROR
+
+**The SAS log is the primary output** — not the results window. SAS narrates what every step did in three
+levels of severity. Learn to read them and you catch most problems before they reach a table.
+
+| Term | Plain-language meaning |
+|---|---|
+| **the log** | SAS's running account of the session — what it read, what it created, and any problems. You read it *first*, before trusting any output. |
+| **NOTE** | Informational. The lines you actually check: how many observations were *read* and how many the new dataset *has*. These are your row-count verification. |
+| **WARNING** | "Something may be wrong but I continued." Common ones: an uninitialized variable, or a many-to-many `MERGE` — output may exist but be incorrect. Never ignore a WARNING. |
+| **ERROR** | "The step failed." No (or wrong) output was produced. Read the message, fix it, rerun. A frequent one is running `BY` without sorting first (see below). |
+
+A few **load-bearing log lines** the course flags (all synthetic listings — nothing was run):
+
+```text
+SAS log (synthetic)
+NOTE: There were 210 observations read from the data set WELL.RAW_PARTICIPANTS.
+NOTE: The data set WELL.PARTICIPANTS has 200 observations and 8 variables.
+```
+
+Read this as: 210 raw rows in, **200** cleaned rows out — the 8 duplicate-id rows and 2 test rows are gone.
+The workflow move is *confirming the count matches what you expected* before going further.
+
+```text
+SAS log (synthetic)
+WARNING: MERGE statement has more than one data set with repeats of BY values.
+```
+
+This is the **many-to-many merge bug**: a DATA step `MERGE` on a key that repeats on both sides silently
+mismatches rows. The fix is a proper one-to-many key or a PROC SQL join — and then you re-check the row count.
+
+```text
+SAS log (synthetic)
+NOTE: Invalid data for enroll_date in line 14 1-10.
+NOTE: Character values have been converted to numeric ...
+NOTE: Missing values were generated as a result of performing an operation on missing values.
+```
+
+In order: a bad **informat** read a date wrong; a **silent type conversion** happened (verify it was what you
+wanted); and arithmetic touched a **missing** value and produced missing. Each is a cue to go check a value.
+
+## Combining tables — MERGE vs PROC SQL join
+
+The study is two tables — `participants` (200 rows) and `screenings` (594 rows) — joined on `participant_id`.
+There are two ways to combine them, and the recurring lesson is the same for both: **check the output row
+count against what you expected.**
+
+| Term | Plain-language meaning |
+|---|---|
+| **`MERGE` (DATA step)** | Combine datasets side by side on a `BY` key **inside a DATA step**. It requires the inputs to be **sorted by the BY variable** first, and a many-to-many merge is almost always a bug. |
+| **`IN=` flag** | A temporary 1/0 marker you request per input on a `MERGE` (`set a(in=ina) b(in=inb)`) to tell which dataset a row came from — the way you detect *unmatched* keys (a participant with no screening, or vice versa). |
+| **PROC SQL join** | Combine tables with SQL syntax. It does **not** require pre-sorting and makes the join type **explicit** (`inner join`, `left join`), which is why the course leans on it for clarity. |
+| **inner join** | Keep only rows whose key appears in **both** tables. In the study, `participants` × `screenings` inner-joined = **594** rows (the 198 screened participants × 3 visits). |
+| **left join** | Keep **every** row from the left table, filling missing where the right has no match. The study's left join = **596** rows — the **2 enrolled-but-unscreened** participants surface with missing screening fields. The 594-vs-596 gap is the recurring "check your row counts" object. |
+
+```sas
+proc sql;
+  create table joined as
+  select p.participant_id, p.arm, s.visit_num, s.systolic_bp
+  from   well.participants as p
+  left join well.screenings as s
+    on   p.participant_id = s.participant_id;
+quit;
+/* expect 596 rows on a LEFT join (594 + 2 unscreened); 594 on an INNER join. ALWAYS verify. */
+```
+
+After any join, the verification move is to compare the actual row count in the log to the count you predicted
+— a broken relationship confesses in the row count, not in an error.
+
+## By-group processing and sorting
+
+Many SAS steps process data *within groups* (per `site`, per `arm`). That requires the data to be in group
+order first — forgetting the sort is one of the most common ERRORs.
+
+| Term | Plain-language meaning |
+|---|---|
+| **`BY` group** | A subset of rows sharing the same value of a `BY` variable — e.g. all `site = "North"` rows. A `BY` statement makes a step run *once per group*. |
+| **`PROC SORT`** | The step that physically orders a dataset by one or more keys. It must come **before** any `BY`-group step (or the data must already carry a sort indicator). |
+| **"not sorted" ERROR** | Running `BY site;` on unsorted data produces `ERROR: Data set ... is not sorted in ascending sequence.` The fix is a prior `PROC SORT ... BY site;`. |
+
+```sas
+proc sort data=well.participants out=well.by_site;
+  by site;                       /* required BEFORE the BY-group step below */
+run;
+
+proc means data=well.by_site;    /* now this can run BY site without error */
+  by site;
+  var systolic_bp;
+run;
+```
+
+```text
+Output (synthetic, not executed) — PROC MEANS systolic_bp, n = 594
+Variable        N      Mean      Std Dev      Minimum    Median    Maximum
+systolic_bp    594    128.4      14.2          96.0      127.0     178.0
+```
+
+Read this as: mean systolic BP **128.4** with SD **14.2** across the 594 screening rows. The workflow move is
+to sanity-check the range (96 to 178 is plausible) and confirm `N` is the 594 you expected, not fewer.
+
+## Statistical vocabulary — and the claims it does (and does not) license
+
+A little statistics vocabulary recurs on the procedure weeks (9–11, 13). The math is light here — the heavy
+lifting is **stating what a result can and cannot claim**.
+
+| Term | Plain-language meaning |
+|---|---|
+| **proportion as a mean** | The **mean of a 0/1 variable is the proportion of 1s.** So `mean(goal_met) = 0.41` means 41% met goal (246 of 594) — a PROC MEANS mean *is* a rate here. |
+| **t statistic** | The standardized two-group mean difference in PROC TTEST. The study: `systolic_bp` by `arm`, $t = -4.27$, df $= 196$, $p < .0001$ — coaching averaged 4.9 mmHg lower. |
+| **F statistic** | The PROC GLM / ANOVA test for *any* difference among 3+ group means. The study: by `site`, $F(2,195) = 5.10$, $p = 0.0071$. |
+| **$R^2$ and RMSE** | In PROC REG, $R^2$ is the share of outcome variance the model explains and RMSE is the typical prediction error in the outcome's units. The study: $R^2 = 0.214$, RMSE $= 12.6$. |
+| **event level** | The outcome category PROC LOGISTIC models. **You must say which level** — `model goal_met(event='1') = ...` (or `descending`) models *meeting* the goal. Get it wrong and every odds ratio inverts. |
+| **odds ratio (OR)** | The multiplicative change in the *odds* of the event. The study: coaching vs usual care, OR $= 1.78$ (95% CI $1.28$–$2.47$). |
+| **OR is not RR** | An **odds ratio is not a risk ratio.** An OR of 1.78 does **not** mean coaching makes the goal "1.78× as likely" — that is a risk ratio. The OR overstates the RR when the outcome is common. Say "odds," not "risk." |
+| **C-statistic (AUC)** | PROC LOGISTIC's ranking accuracy, $0.5$ (chance) to $1$ (perfect). The study: AUC $= 0.69$ — modest discrimination. |
+| **observational ≠ causal** | The study's arms are **not described as randomized**, so every comparison is *associational*. "Coaching is associated with lower BP," never "coaching lowers BP." And **"statistically significant" is not "practically important."** |
+
+## Reporting and reproducibility — ODS and verification
+
+The last cluster is about getting results *out* of SAS and making the whole thing rerunnable — the course's
+endgame.
+
+| Term | Plain-language meaning |
+|---|---|
+| **ODS (Output Delivery System)** | The system that sends PROC output to a *destination* — HTML by default, plus PDF or RTF for reports. `ods pdf file="report.pdf"; ... ods pdf close;` wraps a step's output into a file. |
+| **`ODS TRACE` / `ODS SELECT`** | `ODS TRACE ON;` names each output object a PROC makes; `ODS SELECT` then keeps only the ones you want — how you trim a verbose PROC to a report-ready table. |
+| **PROC SGPLOT / SGPANEL** | The graphing procedures (a histogram of `systolic_bp`, boxplots by `site`). Output is a graphic via ODS — **never paste a screenshot of code or output**; show code as text and a graphic through ODS with a data-table fallback. |
+| **`PROC CONTENTS`** | Prints a dataset's *metadata* — variable names, types, lengths, labels, formats, and the observation count. The first verification move on any new or imported dataset: confirm the types and row count are what you expect. |
+| **`streaminit(20260824)` / `seed=`** | The random-number seed. `call streaminit(20260824);` (and `seed=20260824` in PROC SURVEYSELECT) fixes every simulation so the numbers reproduce on every run — the study's seed is the Aug 24 2026 class start date. |
+| **verification note** | The short block you write after an analysis stating **what the log should say** (expected counts, no unexpected WARNING/ERROR) and **what you checked** (row counts before/after a join, types, `NMISS`, a sanity range). A result you cannot rerun is a result on trust alone. |
+| **`verified: false`** | The page-level flag this whole build carries. SAS was **not executed**; every code block, log line, and number is hand-authored and synthetic. A rendered listing is *not* evidence the code runs or the numbers are right. |
+
+## Reading and source pointer
+
+For the procedures named here, point yourself at the official **SAS documentation** (documentation.sas.com,
+support.sas.com): the **LIBNAME and FORMAT/INFORMAT** statements for libraries and value display, the **DATA
+step** documentation for the PDV and step processing, the **PROC SQL** documentation on joins, **PROC SORT**
+for `BY`-group ordering, **PROC MEANS / FREQ / UNIVARIATE** for summaries, the **ODS** documentation for output
+destinations, and **PROC TTEST / GLM / REG / LOGISTIC** for the statistical procedures. For the *statistical*
+background behind the t-test, ANOVA, regression, and logistic regression (procedure weeks 9, 10, 11), consult
+the open **Introduction to Modern Statistics (IMS), 2nd ed.** (Çetinkaya-Rundel & Hardin, CC BY-SA 3.0,
+openintro-ims.netlify.app) — the inference, regression, and logistic-regression chapters — for the level and
+terminology, not for SAS syntax. "Learning to check the documentation" is itself a course skill, so each entry
+above names the doc page in the course's own words rather than reproducing it.
+
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** Every SAS snippet, log excerpt, and numeric value on this page is **hand-authored,
+synthetic, and was NOT run** — SAS is proprietary and is not executed in this build. The load-bearing numbers
+referenced here are the locked values of the **wellness-program study** (seed `streaminit(20260824)`): **210**
+raw participant rows cleaned to **200** unique participants; **594** screening rows; the **594** inner-join
+versus **596** left-join counts; PROC MEANS `systolic_bp` mean **128.4**, SD **14.2**, range 96–178; the t-test
+$t = -4.27$ (df 196, $p < .0001$); the ANOVA $F(2,195) = 5.10$ ($p = 0.0071$); the regression $R^2 = 0.214$,
+RMSE $= 12.6$; the logistic arm OR **1.78** (95% CI 1.28–2.47) and AUC **0.69**; and the simulation power
+$\approx 0.99$, Type I $\approx 0.05$, mean-`systolic_bp` SE $\approx 0.58$. The course **SAS execution/output
+gate is BLOCKED**; a rendered code block or typed listing is not evidence the code runs or the numbers are
+right. Do not treat any value as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- The companion reference pages: [PROC reference](proc-reference.qmd) (the procedures side by side),
+  [Log & verification guide](log-and-verification-guide.qmd) (reading NOTE / WARNING / ERROR and checking row
+  counts), and [SAS access & project setup](sas-access-setup.qmd) (reaching a SAS environment and organizing a
+  project).
+- The week notes, where each term is introduced in workflow order — start at
+  [Week 1 — what SAS is for now](../notes/week-01-what-sas-is-for-now.qmd); the vocabulary here first lands in
+  [Week 3 — libraries, datasets, variables, formats](../notes/week-03-libraries-datasets-variables-formats.qmd)
+  and [Week 6 — PROC SQL and joins](../notes/week-06-proc-sql-and-joins.qmd).
+
+---
+
+*This page is a study reference. The graded deliverables, their rubrics, and due dates live in Blackboard (the
+LMS) — this page is study and practice only.*

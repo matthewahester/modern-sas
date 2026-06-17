@@ -1,0 +1,439 @@
+---
+title: "Log & verification guide"
+subtitle: "Reading the SAS log and proving an analysis before you trust it"
+page-type: reference
+verified: false
+toc: true
+---
+
+In SAS the **log is the primary output**, not an afterthought. The output window shows you
+tables; the log tells you whether those tables mean what you think they mean — how many rows
+were read, how many were created, which variables were silently converted, and where a step
+quietly broke. This page is the course's reference for the two habits the whole course rests
+on: **read the log** (the NOTE / WARNING / ERROR taxonomy and the load-bearing lines), and
+**verify the data** (row counts before and after a join, variable types, `NMISS`, range
+sanity, and a fixed seed). Keep it open while you read the week notes and work the labs. You
+need no prior SAS experience — every line is explained as it goes.
+
+::: {.callout-important}
+**SAS is shown here, not executed.** Every SAS program, log excerpt, and PROC output table on
+this site is **hand-authored and synthetic** — SAS is proprietary and is **not run** in this
+build. Code appears as static, syntax-highlighted ` ```sas ` text; logs and output appear as
+typed listings labelled "synthetic." A rendered listing is **not** evidence the code ran or
+that the numbers are right. This page carries `verified: false` and the verification-status
+section below. The numbers throughout are the locked values of the synthetic, observational
+**wellness-program study** (seed `streaminit(20260824)`) — not real health data.
+:::
+
+## Why the log is the truth
+
+The single most common mistake new analysts make is to judge a step by its **output** — "a
+table appeared, so it worked." It did not necessarily work. A program with a wrong type, a
+silent conversion, a duplicated key, or a missing-value trap runs to completion and prints a
+tidy table that is simply wrong. The log is where SAS confesses. The recurring test of this
+course — *would someone else be able to understand, rerun, and verify this?* — starts with
+reading the log on **every** step and comparing what it says to what you expected.
+
+Two disciplines, applied to every step:
+
+1. **Read the log.** Scan for the level of each message (NOTE / WARNING / ERROR) and read the
+   load-bearing lines: how many observations were read, how many were created, and any message
+   about types, merges, or missing values.
+2. **Verify the data.** Independently of the log, check the data against expectations: row
+   counts before and after a join, variable types with PROC CONTENTS, missingness with
+   `NMISS`, ranges for impossible values, and a fixed seed on anything random.
+
+## The NOTE / WARNING / ERROR taxonomy
+
+Every line SAS writes to the log carries a level. Learn to triage by level first, then read the
+content.
+
+### NOTE — informational (read it anyway)
+
+A **NOTE** is SAS telling you what it did. Most NOTEs are routine — but several are
+load-bearing, because they report counts and silent conversions you must confirm. *Never skim
+past the NOTEs.* The two you read first are the observations-read and observations-created
+counts.
+
+```sas
+data work.participants_clean;
+    set work.participants_typed;
+    if region = "TEST" then delete;   /* drop the 2 internal test rows */
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 210 observations read from the data set WORK.PARTICIPANTS_TYPED.
+NOTE: 2 observations deleted (region = "TEST").
+NOTE: The data set WORK.PARTICIPANTS_CLEAN has 208 observations and 11 variables.
+NOTE: DATA statement used (Total process time): real time 0.04 seconds
+```
+
+**What the log should say, and the check.** It reads **210** observations, deletes **2**, and
+creates **208** — and `210 − 2 = 208`, which matches the locked arithmetic on the way from 210
+raw rows to 200 clean participants. The workflow move is to *read the count NOTE against a
+number you wrote down first.* If the "observations read" or "observations created" line is not
+what you expected, stop — something upstream is wrong, and no later table will fix it.
+
+### WARNING — something may be wrong (the step still ran)
+
+A **WARNING** means SAS finished the step but suspects a problem. The program did not stop, so
+the output looks fine — which is exactly why a WARNING is dangerous: it is a silent landmine.
+The course's signature WARNING is the many-to-many merge.
+
+```sas
+data work.bad_merge;
+    merge work.participants work.screenings;   /* both have repeated participant_id */
+    by participant_id;
+run;
+```
+
+```text
+SAS log (synthetic)
+WARNING: MERGE statement has more than one data set with repeats of BY values.
+NOTE: The data set WORK.BAD_MERGE has 600 observations and 14 variables.
+```
+
+**What it means, and the fix.** This WARNING says a DATA-step `MERGE` matched a key
+(`participant_id`) that repeats in **both** inputs — a many-to-many merge, which is almost
+always a bug: SAS pairs rows in a way you did not intend and the row count is meaningless (here
+a fabricated 600). The fix is to use a proper one-to-many key or a PROC SQL join that makes the
+relationship explicit, and then **check the row count** — the inner join of
+`participants × screenings` should return **594** rows, not 600. A WARNING is not "safe to
+ignore"; it is a question you must answer.
+
+### ERROR — the step failed (no valid output)
+
+An **ERROR** stops the step. Any output after an ERROR is stale or absent, so an ERROR is the
+*easiest* to catch — it is loud — but you still have to read *why*. The classic course ERROR is
+a by-group step run on unsorted data.
+
+```sas
+proc means data=work.screenings;
+    by site;            /* ERROR: data are not sorted by site */
+    var systolic_bp;
+run;
+```
+
+```text
+SAS log (synthetic)
+ERROR: Data set WORK.SCREENINGS is not sorted in ascending sequence. The current
+       BY group has site = North and the next BY group has site = Central.
+NOTE: The SAS System stopped processing this step because of errors.
+NOTE: There were 70 observations read from the data set WORK.SCREENINGS.
+```
+
+**What it means, and the fix.** A `BY site;` statement requires the data to be **sorted by
+`site`** first (or to carry a sort indicator). Add a `PROC SORT ... BY site;` before the step.
+The lesson: by-group processing is sort-dependent, and the ERROR — not the missing table — is
+what tells you so.
+
+## The load-bearing log messages
+
+These are the specific lines this course flags. Memorize what each one means and the
+verification it should trigger.
+
+### Observations read / observations created — the count NOTE
+
+The two lines you read on every DATA step and most PROCs.
+
+```text
+SAS log (synthetic)
+NOTE: There were 210 observations read from the data set WORK.PARTICIPANTS_RAW.
+NOTE: The data set WORK.PARTICIPANTS has 200 observations and 11 variables.
+```
+
+**Check.** Compare each count to an expectation. The wellness-program import reads **210** raw
+rows and, after removing 8 duplicate-`participant_id` rows and 2 internal test rows, creates
+**200** unique participants — `210 − 2 − 8 = 200`. The screenings table is **594** rows (198
+participants × 3 visits; 2 enrolled participants have 0 screenings). If a count surprises you,
+the gap *is* the bug — or the cleaning work.
+
+### "MERGE statement has more than one data set with repeats of BY values"
+
+The many-to-many merge WARNING (shown above). It means a DATA-step `MERGE` matched a key that
+repeats in both inputs. **Verification:** do not trust the resulting row count; re-do the
+combine as a PROC SQL join with the join type named, and check the output count against the 594
+(inner) versus 596 (left) expectation.
+
+### "Invalid data for `enroll_date` in line …"
+
+A bad **informat** — SAS could not read the incoming text as the kind of value you asked for.
+
+```text
+SAS log (synthetic)
+NOTE: Invalid data for enroll_date in line 47 12-21.
+RULE:     ----+----1----+----2----
+47        08/24/2026
+enroll_date=. _ERROR_=1 _N_=47
+```
+
+**Check.** The wellness file's `enroll_date` arrives as character text like `"08/24/2026"` and
+must be read through the `MMDDYY10.` informat to become a real SAS date. If even one row holds
+a malformed date, this NOTE fires and SAS sets that value to **missing** — a quiet data loss
+you must chase down. The *absence* of this note after applying `MMDDYY10.` is itself a check
+that every date parsed cleanly.
+
+### "Character values have been converted to numeric"
+
+A silent **type conversion**. SAS quietly coerced a character column into numeric (or vice
+versa) so an expression could run.
+
+```text
+SAS log (synthetic)
+NOTE: Character values have been converted to numeric values at the places given by
+      (Line):(Column).
+      17:8
+```
+
+**Check.** A column you expected to be numeric arrived as character (PROC IMPORT met a value it
+could not read as a number, perhaps a `"N/A"`). SAS converted it to let the arithmetic
+proceed — but unparseable values became **missing**. Record how many: if the note reports
+values that could not be converted, those rows are now silently excluded from every mean.
+Confirm the column's type with PROC CONTENTS and verify the missing count with `NMISS`. The fix
+is a deliberate `input(steps_c, best12.)` conversion you read and verify, not an accidental one
+you let slide.
+
+### "Missing values were generated"
+
+Arithmetic touched a missing value, so the result is missing.
+
+```text
+SAS log (synthetic)
+NOTE: Missing values were generated as a result of performing an operation on
+      missing values.
+      Each place is given by: (Number of times) at (Line):(Column).
+      8 at 23:14
+```
+
+**Check.** Numeric missing is `.` and it **propagates**: any arithmetic involving a missing
+value yields missing. After the `age = 199` typo is coerced to missing and the 2 impossible
+`baseline_bmi = 0` values are flagged, a computed BMI-adjusted score on those rows becomes
+missing — eight times, here. That is correct behaviour, but you must *know* it happened,
+because a comparison like `if x > 5` treats missing as **less than any value** (so missing is
+excluded), while `if x < 5` **includes** missing — a classic trap. Check `NMISS` and confirm
+the missing count is what you intended.
+
+## The verification checklist
+
+Reading the log is half the discipline; the other half is checking the **data** against
+expectations, independently of what the log claims. Run this checklist on every analysis.
+
+### 1. Row counts — before and after a join
+
+The signature check of the course. **Count, join, count again, and compare to an expectation.**
+
+```sas
+/* Inner join keeps only matched keys; left join keeps every participant */
+proc sql;
+    create table work.inner_j as
+        select p.participant_id, p.arm, s.visit_num, s.systolic_bp
+        from work.participants as p
+        inner join work.screenings as s
+        on p.participant_id = s.participant_id;
+
+    create table work.left_j as
+        select p.participant_id, p.arm, s.visit_num, s.systolic_bp
+        from work.participants as p
+        left join work.screenings as s
+        on p.participant_id = s.participant_id;
+quit;
+```
+
+```text
+SAS log (synthetic)
+NOTE: Table WORK.INNER_J created, with 594 rows and 4 columns.
+NOTE: Table WORK.LEFT_J created, with 596 rows and 4 columns.
+```
+
+**Check.** The **inner** join returns **594** rows (the 198 screened participants × 3 visits);
+the **left** join returns **596**, because the **2** enrolled-but-unscreened participants
+surface with missing screening fields (`594 + 2 = 596`). That two-row gap *is* the teaching
+object: a join that returns a number you cannot explain is a broken join. Always write down the
+expected count before you run the join, and reconcile any difference — never equate the 200-row
+`participants` grain (one row per person) with the 594-row `screenings` grain (one row per
+visit).
+
+### 2. Variable types — PROC CONTENTS
+
+Character versus numeric is **load-bearing**. Confirm the type of every variable you will
+compute on.
+
+```sas
+proc contents data=work.participants varnum;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+ #   Variable         Type     Len   Format
+ 1   participant_id   Num        8
+ 2   age              Num        8
+ 3   sex              Char       1
+ 4   arm              Char      10
+ 5   enroll_date      Num        8    DATE9.      <-- now a real SAS date
+ 6   baseline_bmi     Num        8
+```
+
+**Check.** `participant_id`, `age`, `baseline_bmi`, and `goal_met` must be **numeric** (a
+number stored as character blocks PROC MEANS with `Variable … does not match type prescribed
+for this list`); `sex`, `site`, `arm`, `region` are **character** labels; `enroll_date` should
+be numeric with a `DATE9.` format, not `Char`. Read the `Type` column against your expectation
+— a wrong type caught here saves a broken PROC later.
+
+### 3. Missingness — `N` and `NMISS`
+
+Count what is present *and* what is missing.
+
+```sas
+proc means data=work.participants n nmiss min max;
+    var age baseline_bmi;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+ Variable          N    NMISS     Minimum     Maximum
+ age             199        1         22.0        61.0   <-- the 199 typo is now missing
+ baseline_bmi    198        2          0.0        41.8   <-- 0.0 flags an impossible value
+```
+
+**Check.** `NMISS` quantifies the missing values: after the `age = 199` typo is coerced to
+missing, `age` has 1 missing; the 2 impossible `baseline_bmi = 0` values show up at the
+minimum. A non-zero `NMISS` is not always a problem — but it is always something you should be
+able to *explain*. The mean of a 0/1 variable is a **proportion** (so `mean(goal_met) = 0.41`
+over the 594 screening rows), another value to read deliberately.
+
+### 4. Range sanity — impossible values
+
+A value can be the right *type*, present, and still impossible. Check min and max.
+
+**Check.** An age of `199` and a `baseline_bmi` of `0` are both numeric and non-missing — they
+pass a type check and a missingness check — yet neither is possible for a person. The min/max
+from PROC MEANS (or a PROC UNIVARIATE extreme-values report) is what catches them. Decide
+deliberately whether to coerce to missing, flag, or drop, and leave an audit trail (`age_flag`,
+`bmi_flag`) rather than silently overwriting data.
+
+### 5. Set the seed — anything random
+
+Reproducibility for simulation and sampling.
+
+```sas
+data work.sim;
+    call streaminit(20260824);   /* fix the stream BEFORE any RAND draw */
+    do rep = 1 to 10000;
+        x = rand("normal", 128.4, 12);   /* synthetic systolic_bp draws */
+        output;
+    end;
+run;
+```
+
+**Check.** `call streaminit(20260824)` (and `seed=20260824` for PROC SURVEYSELECT) fixes the
+random stream so every run returns the same numbers — which is what lets a reader confirm your
+results. With the seed set, the locked simulation results reproduce: empirical **power ≈ 0.99**
+under the observed arm effect, **Type I ≈ 0.05** under the null, and a sampling SE of the mean
+`systolic_bp` of about **0.58**. If your simulated numbers change run to run, you did not set
+the seed, or you set it *after* a draw — move `streaminit` above the loop.
+
+## The verification note
+
+Bundle the checks into a short written record attached to every analysis — expected versus
+actual counts, types confirmed, missingness checked, the seed used. It is the difference
+between a result someone can rerun and a result on trust alone, and it answers the course's
+recurring question directly: *could someone else understand, rerun, and verify this?* A worked
+verification note for the wellness import reads, in plain words: "Expected 210 raw rows, 200
+after cleaning — confirmed (`210 − 2 test − 8 duplicate = 200`). Types confirmed with PROC
+CONTENTS: `enroll_date` is now numeric `DATE9.`, `participant_id` numeric. `NMISS`: `age` 1
+(the 199 typo), `baseline_bmi` 2 (the impossible zeros) — all flagged. Inner join to screenings
+= 594, left = 596 (the 2 unscreened) — reconciled. Seed `streaminit(20260824)`." Anyone can
+rerun that.
+
+## If the log surprises you
+
+- **A count you cannot explain.** "Observations read" or "observations created" is not the
+  number you wrote down first. Stop and reconcile — a wrong count upstream poisons every table
+  downstream. For a join, walk the 594-versus-596 logic before you proceed.
+- **A WARNING you skipped.** The step ran and a table appeared, so you moved on — but a
+  `MERGE … repeats of BY values` WARNING means the row count is meaningless. Re-do it as a PROC
+  SQL join and recount.
+- **A PROC that "won't run" on a number.** `Variable … does not match type prescribed for this
+  list` means a number arrived as character. Confirm with PROC CONTENTS and convert with
+  `input(..., best12.)`, then re-read the `Character values have been converted to numeric`
+  note.
+- **A by-group ERROR.** `Data set … is not sorted` means a `BY` statement ran on unsorted data
+  — add a `PROC SORT … BY …;` first.
+- **Numbers that change every run.** You did not fix the seed, or set it after a random draw.
+  Put `call streaminit(20260824)` above the simulation.
+- **A clean log that still feels wrong.** Remember the deepest trap: on this site a tidy log and
+  a neat table are **hand-authored and synthetic**. A rendered listing is never, by itself,
+  evidence the code runs or the numbers are right — the written verification note is the
+  safeguard.
+
+## A note on AI help
+
+You may use an AI assistant to explain a log message or help debug your own SAS program, but
+you must check what it produces — re-run the program, read the log NOTE/WARNING/ERROR lines
+yourself, reconcile the row count against your expectation, and include an **AI Use Note**
+(Tool / Purpose / Verification) on any work that asks for one. Verification is the load-bearing
+line: an AI can draft a PROC SQL join, but *you* confirm the result is 594 inner / 596 left and
+can say why.
+
+## Reading and source pointer
+
+For the messages on this page, the relevant **SAS documentation** is the guidance on the **SAS
+log** and log messages (how SAS reports NOTE / WARNING / ERROR and the
+observations-read/created counts), the **DATA-step MERGE** documentation (the repeats-of-BY
+-values condition), the **informat** reference (e.g. the `MMDDYY` informat behind an "Invalid
+data" note), and the **PROC CONTENTS**, **PROC MEANS**, and **PROC SQL** documentation for the
+verification checks (variable types, `N`/`NMISS`, and join types). Use these as a reading
+pointer when you adapt the idioms above — *learning to check the documentation* is itself a
+course skill. These notes are the course's own synthesis: grounded in the SAS documentation and
+open statistics references, but not copied from them. SAS® and all SAS Institute product names
+are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, log excerpts, and **every numeric value on this page are
+hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this
+build. The course **SAS execution/output gate is BLOCKED**; a rendered, syntax-highlighted code
+block or a typed log/output listing is not evidence that the code runs or that the numbers are
+correct. The load-bearing values here — the **210** raw rows read, **2** test rows deleted,
+**208** then **200** unique participants; the **594** screening rows and the **594** inner-join
+versus **596** left-join counts (the **2** unscreened participants); the `age = 199` typo and
+**2** impossible `baseline_bmi = 0` values surfaced by `NMISS` and range checks; the
+bad-informat, character-to-numeric, and missing-value NOTEs; `mean(goal_met) = 0.41`; and the
+simulation figures (power **≈ 0.99**, Type I **≈ 0.05**, mean-`systolic_bp` SE **≈ 0.58**) —
+are drafted "as if run" for this draft site and cross-checked only for internal and
+narrative consistency. All data are **synthetic** (`call streaminit(20260824)`) and represent
+the `wellness-program study`, an observational program — not real health records. Do not treat
+any value here as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study
+material only. No graded prompts, answer keys, rubrics, point values, or due dates appear on
+this site. Graded SAS workflow checkpoints, skill checks, homework, analytics labs, the midterm
+practical, the final analytics project, and the final practical live in **Blackboard (the
+LMS)**, which is authoritative for due dates, submissions, and grades. If this page and
+Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- [SAS workflow glossary](sas-workflow-glossary.qmd) — *library*, *dataset*, *observation* vs
+  *variable*, *format* vs *informat*, the PDV, character vs numeric, missing values, and the
+  NOTE / WARNING / ERROR levels.
+- [PROC reference](proc-reference.qmd) — PROC IMPORT, CONTENTS, FREQ, MEANS, SQL, SORT, and the
+  rest, each with the verification check to run after it.
+- [SAS access & project setup](sas-access-setup.qmd) — reaching a SAS environment and
+  organizing a reproducible project (the SAS-access caveat lives here too).
+- [Week 5 — Importing, cleaning, and validating data](../notes/week-05-importing-cleaning-validating.qmd)
+  — where the row-count, type, and `NMISS` checks are first put to work.
+- [Week 6 — PROC SQL and joins](../notes/week-06-proc-sql-and-joins.qmd) — the 594-vs-596 join
+  check in full.
+
+---
+
+*This page is a study reference. For graded specifics — deadlines, submissions, and policies —
+**Blackboard (the LMS) is authoritative**.*

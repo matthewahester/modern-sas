@@ -1,0 +1,501 @@
+---
+title: "Week 15 — Final analytics project and review"
+subtitle: "The whole SAS analytics workflow as one picture"
+page_mode: overview_review_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+depth_rationale: "One-day synthesis meeting, Mon Dec 7 (last class); consolidates the whole SAS analytics workflow and supports the final analytics project and the cumulative final practical rather than introducing new procedures."
+readings:
+  - "SAS documentation — PROC IMPORT / PROC CONTENTS — supports the import-and-validate stage of the pipeline review"
+  - "SAS documentation — PROC SQL (joins, GROUP BY) — supports the assemble-and-check stage of the pipeline review"
+  - "SAS documentation — PROC TTEST / PROC REG / PROC LOGISTIC — supports the analyze stage of the pipeline review"
+  - "SAS documentation — ODS (HTML/PDF) and program organization (%INCLUDE) — supports the report-and-reproduce stage"
+toc: true
+---
+
+## The week question
+
+Across fourteen weeks you have built the SAS analytics workflow one procedure at a time: the environment and a
+`libname` (weeks 1–3), the DATA step and cleaning (weeks 4–5), PROC SQL joins (week 6), summaries and tables
+(weeks 7–8), the statistical procedures — t-test, ANOVA, regression, logistic (weeks 9–11), reshaping and
+merging (week 12), simulation (week 13), and the reproducible report (week 14). Each week you learned to *read
+the log, check the row count, confirm the types, and say what the result does and does not show*. This final
+week asks the question that ties all of it together: **can you see the whole pipeline as one connected
+picture — and trace a single study from raw import to a defensible, reproducible conclusion?** No new
+procedures appear this week. Instead you walk the recurring wellness-program study end to end one last time,
+watching the same two data objects — the **200** cleaned participants and the **594** screening rows — move
+through every stage, and you name the verification habit that protects each stage. This is the synthesis that
+the final analytics project and the cumulative final practical rest on.
+
+## Why this matters
+
+A course is not a list of procedures; it is a *workflow*. The difference between someone who "knows some SAS"
+and someone who can be trusted with an analysis is whether they can carry a messy dataset from import to a
+written, rerunnable conclusion without losing rows, mistyping a key, or overclaiming a result. This week
+matters for three reasons. First, **the stages are not independent** — a missed type problem in week 5 becomes
+a silently dropped join in week 6, which corrupts the t-test in week 9 and the report in week 14. Seeing the
+pipeline whole is the only way to see how an early slip propagates. Second, **the verification habit is the
+through-line, not any one PROC**: at every hand-off — after the import, after the join, after the merge, after
+the model — the same question recurs, *would someone else be able to understand, rerun, and verify this?* The
+review consolidates that habit into a single checklist you can apply to your own project. Third, the final
+analytics project asks you to do exactly this on data of your own: import, validate, assemble, analyze, report,
+and interpret responsibly. This week is the map you carry into that work. Everything here is **public study
+material**; the graded project and the final practical live in Blackboard (see the boundary footer).
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Lay out the full SAS analytics workflow as one connected sequence — environment → data → validate → assemble
+  → analyze → report → verify → interpret — and name the procedure and the verification check at each stage.
+- Trace the recurring wellness-program study's two objects (the **200** cleaned participants, the **594**
+  screening rows) through every stage, and explain why the inner join is **594** and the left join is **596**.
+- Recite, for each stage, *what the log should say* and *what to check* (row counts, variable types, `NMISS`),
+  and explain how an unchecked count or a character-versus-numeric key breaks everything downstream.
+- Restate each statistical result the course produced — the t-test ($t = -4.27$, $p < .0001$), the ANOVA
+  ($F = 5.10$, $p = 0.0071$), the regression ($R^2 = 0.214$), the logistic odds ratio ($1.78$) — *with its
+  correct, hedged interpretation* (observational, not causal; an odds ratio is not a risk ratio; significant is
+  not important).
+- Apply a transferable end-to-end checklist to a new synthetic study, so the workflow is a general competence,
+  not a memorized script for one dataset.
+- State plainly that all numbers shown are synthetic (seed `streaminit(20260824)`), the SAS code was not run in
+  this build, and the page is `verified: false`.
+
+## Core vocabulary
+
+No new SAS keywords this week — instead, the vocabulary of the *workflow itself*, the words you use to talk
+about an analysis as a connected whole.
+
+- **Pipeline (workflow)** — the ordered sequence of steps that carries data from raw input to a documented
+  conclusion: environment → import → clean/validate → assemble (join/merge) → summarize → analyze → report →
+  verify → interpret. Each step *hands off* a defined object to the next.
+- **Analysis dataset** — the single, validated, analysis-ready table the early stages produce and the
+  procedures consume. In this study it is built by joining `participants` and `screenings` on `participant_id`.
+- **Grain (cardinality)** — what one row *means* in a table. `participants` is one row per person (200);
+  `screenings` is one row per person-per-visit (594). The grain determines every join row count — predict it.
+- **Verification check** — the cheap confirmation that closes each stage: a row count against the grain, a type
+  check via PROC CONTENTS, an `NMISS` count, a proportion that must lie in $[0,1]$, a sanity range on a mean.
+- **Reproducibility** — the property that one program, run top-to-bottom with `streaminit(20260824)` and no
+  manual point-and-click, recreates every number and the final report exactly. A result you cannot rerun is a
+  result on trust alone.
+- **Provenance / traceability** — being able to say where each number came from: which raw file, which cleaning
+  rule, which join, which procedure, which assumption. The report (week 14) and the verification notes carry it.
+- **Responsible interpretation** — stating what a result *does* and *does not* show: the wellness arms are
+  **not described as randomized**, so every arm contrast is **associational, not causal**, and an odds ratio is
+  **not** a risk ratio. "Statistically significant" is not "practically important."
+
+## Concept development
+
+### The workflow as one picture: the eight stages
+
+Here is the whole course on one page. Read it top to bottom; each arrow is a *hand-off*, and under each
+hand-off is the verification check that protects it. The two study objects — **200** participants, **594**
+screenings — flow through the middle.
+
+```text
+SAS analytics workflow (synthetic wellness-program study, seed streaminit(20260824))
+
+  STAGE              SAS TOOL (course week)            WHAT MOVES THROUGH         CHECK AT THE HAND-OFF
+  ----------------   -------------------------------   ------------------------   -----------------------------
+  1 Environment      libname, options (wk 1-3)         a folder of datasets       libref resolves; options set
+  2 Import           PROC IMPORT / INFILE (wk 5)       210 raw rows               "210 observations read"
+  3 Clean & validate DATA step, IF/THEN (wk 4-5)       210 -> 200 unique          200 rows; NMISS; types fixed
+  4 Assemble (join)  PROC SQL / MERGE (wk 6, 12)       participants x screenings  inner 594 vs left 596
+  5 Summarize        PROC MEANS/FREQ/UNIVARIATE (7-8)  594-row analysis data      N vs NMISS; counts add up
+  6 Analyze          TTEST/GLM/REG/LOGISTIC (9-11)     198-row baseline slice     assumptions; df; ref level
+  7 Report           ODS HTML/PDF, %INCLUDE (wk 14)    tables + figures           one program reruns clean
+  8 Verify+interpret notation_ledger, hedged prose     the written conclusion     verified:false; not causal
+```
+
+**What to check.** The point of the map is that the *check column is the spine* — not the tool column. Every
+stage ends with a number or a property you confirm before passing the object on. If stage 3 hands stage 4 a
+table with 210 rows instead of 200, the join row count will be wrong and you will catch it at stage 4 — but
+only if you look. The workflow move named here: *each stage produces an object you read, confirm, and only then
+trust*. A pipeline with no checks is a pipeline that fails silently.
+
+### Tracing the two objects: from 210 raw rows to a 594-row analysis dataset
+
+Follow the data, not the syntax. The study begins as **210 raw participant rows** with known quality problems,
+and the cleaning stage removes exactly the rows and fixes exactly the fields the course locked in week 5.
+
+```sas
+/* Stage 2-3: import then clean the participants table */
+libname wp "/home/u_wellness/data";          /* permanent library */
+options validvarname=v7;
+
+data wp.participants;
+  set wp.participants_raw;                    /* 210 raw rows imported */
+  /* fix the locked data-quality issues (week 5) */
+  if age = 199 then age = .;                  /* impossible age typo -> missing */
+  if baseline_bmi = 0 then baseline_bmi = .;  /* impossible BMI -> missing */
+  enroll_date = input(enroll_char, mmddyy10.);/* char "08/24/2026" -> SAS date */
+  format enroll_date mmddyy10.;
+  if test_row = 1 then delete;                /* drop 2 internal test rows */
+run;
+
+proc sort data=wp.participants nodupkey;      /* drop 8 duplicate-id rows */
+  by participant_id;
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 210 observations read from the data set WP.PARTICIPANTS_RAW.
+NOTE: Missing values were generated as a result of performing an operation on missing values.
+NOTE: 2 observations deleted (test rows).
+NOTE: The data set WP.PARTICIPANTS has 200 observations and 8 variables.
+NOTE: 8 observations with duplicate key values were deleted.
+```
+
+**What to check.** The headline count: **210 → 200**, exactly accounting for the 8 duplicate-id rows and the 2
+test rows. The `Missing values were generated` NOTE is *expected* here — it is the age=199 and bmi=0 coercions,
+not a surprise. After this you would run PROC FREQ to confirm the locked cleaned frequencies: `sex` F **104** /
+M **96**, `arm` coaching **100** / usual_care **100**, `site` North **70** / Central **66** / South **64** (and
+those must sum to 200). The workflow move: *the cleaning stage is where you earn the right to trust every later
+number*; if 200 is wrong, everything downstream inherits the error. Note also that `enroll_date` was a
+**character** field until the `input(..., mmddyy10.)` informat turned it into a real SAS date — a date is a
+number displayed with a date format, and a date left as text blocks every date calculation later.
+
+Now the assemble stage, where the two objects meet:
+
+```sas
+/* Stage 4: join the cleaned tables; predict the count, then check it */
+proc sql;
+  create table wp.analysis as
+  select p.participant_id, p.arm, p.site, p.age, p.baseline_bmi,
+         s.visit_num, s.systolic_bp, s.goal_met
+  from wp.participants as p
+       inner join wp.screenings as s
+       on p.participant_id = s.participant_id;
+quit;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: Table WP.ANALYSIS created, with 594 rows and 8 columns.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.05 seconds
+```
+
+**What to check.** Predict first: 198 screened participants × 3 visits = **594**; the 2 enrolled-but-unscreened
+participants have no key match and drop out of the inner join. A **left** join would return **596** — the 594
+plus the 2 unscreened rows with missing screening fields. If you wanted "every enrolled person," 594 silently
+lost two; if you wanted "only screened visits," 596 carried two empty rows. The 594-versus-596 gap is the
+course's cardinal verification object: *the row count tells you which rows the join kept, and it costs one
+second to read off the log.*
+
+### The verification habit at every stage (the through-line, not a PROC)
+
+The single most important idea of the whole course is not a procedure — it is a *reflex*. After every step you
+ask what the log should say and you run one cheap check. Here is the reflex stage by stage, as a checklist.
+
+```text
+The verification reflex (apply at every hand-off)
+
+  After you ...                 The log should say ...               You check ...
+  ---------------------------   ----------------------------------   ----------------------------------
+  import a file                 "N observations read"                N matches the source (210)
+  clean/subset a DATA step      "data set has N observations"        the count is what cleaning intends (200)
+  fix a type with input/put     "char values converted to numeric"   the conversion was intended, not silent
+  join two tables               "table created, with N rows"         N matches the grain prediction (594/596)
+  merge with BY                 no "MERGE has repeats of BY" WARNING  keys are unique; no many-to-many bug
+  run PROC MEANS                (no error)                            N vs NMISS; a 0/1 mean is a proportion
+  fit a model                   "N observations used"                df and N match the slice (198/196)
+  generate random data          (no error)                           streaminit(20260824) set for reruns
+```
+
+**What to check.** The discipline is the same shape every time: *read the NOTE, confirm the count, check the
+types, check NMISS, then trust the object*. Three log lines are the course's red flags to memorize: `WARNING:
+MERGE statement has more than one data set with repeats of BY values` (a many-to-many merge bug — fix with PROC
+SQL or a proper key), `NOTE: Character values have been converted to numeric` (a silent type conversion to
+verify, not ignore), and `NOTE: Invalid data for enroll_date` (a bad informat). The workflow move: *the log is
+primary output, not exhaust* — the rendered tables look identical whether the analysis is right or broken; the
+log and the counts are how you tell the difference.
+
+### From numbers to claims: what each result does and does not show
+
+The final stage of the pipeline is the one students most often skip: stating the result *with its hedges*. The
+course produced four headline statistical results, and each carries a specific interpretive boundary you must
+restate correctly.
+
+```text
+The four results and their boundaries (all synthetic, baseline slice n=198 unless noted)
+
+  PROC      result (locked)                          says ...                  does NOT say ...
+  --------  ---------------------------------------  ------------------------  ---------------------------
+  TTEST     coaching 125.9 vs usual_care 130.8;      arms differ on average    coaching CAUSED lower BP
+            diff -4.9, t=-4.27, df196, p<.0001        in this sample            (arms not randomized)
+  GLM/ANOVA North126.1/Central128.9/South130.6;      site means differ         which pairs differ, or why;
+            F(2,195)=5.10, p=0.0071                    overall                   not a causal site effect
+  REG       bp = 86.5 + 0.45*age + 1.02*bmi;          age & bmi associate      a 0.45 change is large or
+            R^2=0.214, RMSE=12.6                       with bp; 21% of var       practically important
+  LOGISTIC  arm OR 1.78 (1.28-2.47, p=0.0006);        coaching has higher       the RISK is 1.78x; OR is
+            C-stat 0.69                                odds of meeting goal      NOT a risk ratio
+```
+
+**What to check.** Every row hedges in the same two ways. First, **observational ≠ causal**: the synthetic arms
+are *not described as randomized*, so the −4.9 mmHg gap and the 1.78 odds ratio are *associations*, not effects
+of coaching — the difference could reflect who enrolled in each arm. Second, **the statistic is not the claim**:
+$p < .0001$ means the difference is distinguishable from zero in this sample, not that it is large or important;
+$R^2 = 0.214$ means age and BMI together explain about 21% of the variation in systolic BP, leaving most
+unexplained; and the logistic **odds ratio of 1.78 is not a risk ratio** — odds and risk diverge when the
+outcome is common (here goal_met ≈ 0.41). The workflow move: *say what the result does and does not show, in the
+same breath as the number*. That sentence is the difference between an analysis and an overclaim.
+
+## Worked examples
+
+### Worked example — the wellness-program study end to end (the recurring slice)
+
+**The task.** Walk the recurring study through the whole pipeline in one connected pass — import → clean →
+join → one statistical procedure → one-line conclusion — and show the verification check at each hand-off.
+This is the synthesis the final project mirrors. The data are **synthetic; seed `streaminit(20260824)`**,
+observational, and **not real health data**.
+
+**The code.** Stages 2–4 appeared above (210 → 200 clean, inner join → 594). Here is the analyze stage on the
+baseline slice, the one-row-per-participant view the procedures use.
+
+```sas
+/* Stage 6: t-test on the per-participant visit-1 baseline slice */
+data wp.baseline;
+  set wp.analysis;
+  if visit_num = 1;                 /* one row per participant: n = 198 */
+run;
+
+proc ttest data=wp.baseline;
+  class arm;                        /* 2 groups -> two-sample t-test */
+  var systolic_bp;
+run;
+```
+
+**The synthetic output and log.**
+
+```text
+Output (synthetic, not executed)
+
+  arm           N    Mean    Std Dev
+  -----------  ---  ------   -------
+  coaching      99   125.9     12.1
+  usual_care    99   130.8     11.9
+
+  Method         Variances    DF   t Value   Pr > |t|
+  ------------   ---------   ----  --------   --------
+  Pooled         Equal        196    -4.27     <.0001
+
+  Diff (coaching - usual_care)   95% CL Mean
+  ----------------------------   ----------------
+              -4.9               (-7.2, -2.6)
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 198 observations read from the data set WP.ANALYSIS where visit_num=1.
+NOTE: The data set WP.BASELINE has 198 observations and 8 variables.
+NOTE: PROCEDURE TTEST used (Total process time):
+      real time           0.04 seconds
+```
+
+**The verification check.** The baseline slice is **198** rows, not 594 — one per *screened* participant, which
+is the right grain for a per-person comparison (the 2 unscreened participants have no visit-1 row). The two
+group sizes **99 + 99 = 198** confirm the slice and match the balanced 100/100 arm split minus one unscreened
+person per arm. Before trusting the means you would confirm `NMISS(systolic_bp) = 0` on the slice, since the
+t-test drops missing values silently. The pooled $t = -4.27$ on $df = 196$ ($= 198 - 2$) and the difference
+$-4.9$ with 95% CI $(-7.2, -2.6)$ are the locked numbers — and the degrees of freedom themselves are a check
+(two groups of 99 give $df = 196$; a different $df$ would mean a different N reached the test).
+
+**The interpretation.** In this synthetic study, coaching-arm participants average about 4.9 mmHg lower
+baseline systolic BP than usual-care participants, and that gap is statistically distinguishable from zero
+($p < .0001$). But it is an **association, not a causal effect** — the arms are not described as randomized, so
+the gap could reflect who enrolled where rather than the coaching itself — and a 4.9 mmHg difference being
+*detectable* is not the same as it being *clinically important*. The whole pipeline now reads as one sentence
+you could defend: *we imported 210 rows, validated down to 200 participants, joined to 594 screenings, sliced
+to the 198-person baseline, and found an associational arm difference of −4.9 mmHg.* Every number in that
+sentence has a verification check behind it. That is the analysis the final project asks you to produce.
+
+### Worked example — transfer: an end-to-end checklist applied to a new study
+
+**The task.** Show that the pipeline is a general competence, not a script for one dataset, by applying the same
+end-to-end checklist to a *new* synthetic study you might encounter in your own project. Imagine a campus
+`tutoring-center study`: a `students` table (one row per student) and a `sessions` table (one row per
+student-per-session), joined by `student_id`, with outcome `passed_course` (1/0). The data are **synthetic;
+seed `streaminit(20260824)`** and illustrative only — these are **not** locked study numbers.
+
+**The code.** Same eight-stage shape, new tables. Here is the assemble-and-check stage plus a grouped pass rate.
+
+```sas
+/* Stage 4-5: join, check the count, then a grouped 0/1 summary */
+proc sql;
+  create table tc.analysis as
+  select st.student_id, st.cohort,
+         se.session_num, se.passed_course
+  from tc.students  as st
+       inner join tc.sessions as se
+       on st.student_id = se.student_id;
+quit;
+
+proc sql;
+  select cohort,
+         count(*)            as n_sessions,
+         mean(passed_course) as pass_rate format=5.2   /* mean of 0/1 = a proportion */
+  from tc.analysis
+  group by cohort
+  order by cohort;
+quit;
+```
+
+**The synthetic output and log.**
+
+```text
+SAS log (synthetic)
+
+NOTE: Table TC.ANALYSIS created, with 360 rows and 4 columns.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+```
+
+```text
+Output (synthetic, not executed)
+
+  cohort    n_sessions   pass_rate
+  -------   ----------   ---------
+  Fall          180         0.62
+  Spring        180         0.55
+```
+
+**The verification check.** Run the *identical reflex* you ran on the wellness study. Predict the join count
+from the grain (here a notional 120 students × 3 sessions = **360**) and confirm the log's `360 rows`. The two
+cohort counts **180 + 180 = 360** must sum to the join total — they do, so the join neither dropped nor
+duplicated rows. Because `passed_course` is 0/1, its `MEAN` is a **proportion** and must lie in $[0,1]$: 0.62
+and 0.55 both do; a value of 1.4 would mean the variable is not actually 0/1 (a coding or type problem) and you
+would stop. You would also check `student_id` is the same **type** in both tables before joining — a character
+key in one and numeric in the other returns 0 rows or a silently wrong set.
+
+**The interpretation.** The Fall cohort shows a higher synthetic pass rate (0.62) than Spring (0.55) — same
+machinery, wholly different study, which is the entire point: import, validate, join-and-check, summarize,
+interpret-with-hedges is a *general* workflow you bring to any data. And the same cautions transfer: these are
+invented numbers, cohort is not a randomized treatment so the gap is **observational, not causal**, and a
+visible difference is not a tested or practically important one. If you can run this checklist on a study you
+have never seen, you have the competence the course was built to give you.
+
+## A common mistake
+
+The signature failure of a *whole pipeline* is not any single PROC error — it is **letting an early, unchecked
+slip propagate silently to the end**, where it looks like a clean result. Three forms recur, one per stage
+family, and all share the same fix: *check at the hand-off, not at the end*.
+
+- **An unchecked count after cleaning or joining.** If the cleaning stage hands the join a 210-row table
+  (duplicates not removed) instead of 200, the inner join can balloon past 594 via many-to-many matching, and
+  the log warns `WARNING: A Cartesian product has been detected` or `MERGE statement has more than one data set
+  with repeats of BY values`. The means and the t-test still *run* — on inflated, duplicated data. **The fix:**
+  predict and verify the count at *every* hand-off (210 → 200 → 594 / 596), so a wrong count stops you at the
+  stage that caused it, not three stages later.
+
+- **A character-versus-numeric key or field carried downstream.** `participant_id` read as text `"10427"`
+  instead of the number `10427`, or `enroll_date` left as the character string `"08/24/2026"`, breaks the join
+  (0 rows or a silently wrong match) and every date calculation. Nothing necessarily errors. **The fix:** run
+  PROC CONTENTS at the hand-offs and confirm types; convert with `input()`/`put()` and verify the
+  `Character values have been converted to numeric` NOTE was intended.
+
+- **Overclaiming the result at the end.** Reporting "coaching lowers blood pressure" (causal) from observational
+  arms, or reading the logistic **odds ratio of 1.78 as a risk ratio**, or calling a $p < .0001$ difference
+  "important" — these are interpretation failures, the last and quietest mistake. **The fix:** the responsible-
+  interpretation reflex — *observational ≠ causal, OR ≠ RR, significant ≠ important* — stated in the same
+  sentence as the number, every time.
+
+The deeper point, true of the whole course: **SAS tells you what it did, never whether it was right.** The
+rendered report looks identical whether the analysis is sound or silently broken. The counts, the types, the
+`NMISS`, and the hedged interpretation are the only things standing between a defensible analysis and a
+confident wrong answer. That reflex — applied at every stage — *is* the course.
+
+## Low-stakes self-checks (ungraded)
+
+For self-study only — ungraded, nothing to submit.
+
+1. From memory, list the eight workflow stages in order, and for each name one SAS tool (a PROC or step) and
+   one verification check. Where does the **594** object first appear, and where does **200**?
+2. Explain in two sentences why the inner join of the study tables is **594** and the left join is **596**.
+   Which join answers "how many enrolled participants were never screened?"
+3. For each of the four headline results (t-test, ANOVA, regression, logistic), write one sentence that states
+   the result *and* its correct hedge (observational vs causal; OR vs RR; significant vs important).
+4. A classmate's pipeline reports arm means but the join returned 1,188 rows instead of 594. Trace backward:
+   which earlier stage most likely failed, what log line would warn you, and what is the fix?
+5. The baseline slice is **198** rows and the t-test reports $df = 196$. Explain, in terms of grain and the
+   two-group formula, why both numbers are exactly what you should expect.
+6. Apply the end-to-end checklist to a study of your own choosing (synthetic): name the two tables, predict the
+   join row count from their grains, and state the one verification check you would run after the join.
+
+## Reading and source pointer
+
+This week revisits the procedures of the whole course rather than introducing a new one, so the reading is a
+*tour* of the relevant **SAS documentation** pages you used along the way: the **PROC IMPORT / PROC CONTENTS**
+pages for the import-and-validate stage; the **PROC SQL** pages (the `SELECT` statement and the **joins** /
+`GROUP BY` material) for the assemble-and-check stage; the **PROC TTEST**, **PROC REG**, and **PROC LOGISTIC**
+pages for the analyze stage (note in PROC LOGISTIC how the documentation describes the `event=` / `DESCENDING`
+option that fixes *which level is modeled*); and the **ODS** (HTML/PDF) and program-organization (`%INCLUDE`)
+pages for the report-and-reproduce stage. For the statistical *background* behind the results being reviewed —
+the t-test, ANOVA, regression, and logistic regression, and the responsible-interpretation cautions — see the
+relevant chapters of **Introduction to Modern Statistics (IMS), 2nd ed. (Çetinkaya-Rundel & Hardin), CC BY-SA
+3.0**, free at openintro-ims.netlify.app, used here only to calibrate the level of the statistical ideas, not
+as a SAS manual. Use all of these as reading pointers in the course's own words: practise finding the
+authoritative syntax and the exact option names yourself, because "learning to check the documentation" is a
+course skill. These notes are the course's own synthesis: grounded in the SAS documentation and open statistics
+references, but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute
+Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The
+load-bearing numbers reviewed here — the **210 → 200** cleaned participants and the cleaned frequencies (sex
+**104 / 96**, arm **100 / 100**, site **70 / 66 / 64**); the **594**-row inner join versus **596**-row left
+join and the 2 unscreened participants; the **198**-row baseline slice; the t-test (coaching **125.9** vs
+usual_care **130.8**, diff **−4.9**, CI **(−7.2, −2.6)**, $t = -4.27$, $df = 196$, $p < .0001$); the ANOVA
+(means **126.1 / 128.9 / 130.6**, $F(2,195) = 5.10$, $p = 0.0071$); the regression (intercept **86.5**, age
+**0.45**, bmi **1.02**, $R^2 = 0.214$, RMSE **12.6**); the logistic (arm OR **1.78**, CI **1.28–2.47**,
+$p = 0.0006$, C-statistic **0.69**); the simulation (power ≈ **0.99**, Type I ≈ **0.05**, mean-BP SE ≈
+**0.58**); and the illustrative (non-locked) transfer figures (360 sessions, 180 / 180, pass rates 0.62 /
+0.55) — are drafted "as if run" for this draft site and cross-checked only for internal and narrative
+consistency against the locked wellness-program study (seed `streaminit(20260824)`). The course **SAS
+execution/output gate is BLOCKED**; a rendered code block or typed listing is not evidence the code runs or the
+numbers are right. Do not treat any value here as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week there is no next week — this is the last class (Mon Dec 7), and what follows is the **final analytics
+project** and the **cumulative final practical** during the final-exam window (Dec 9–15; the exact block is
+posted in Blackboard). Carry the eight-stage map and the verification reflex into both: import and validate
+before you analyze, predict and check every row count, confirm your types and `NMISS`, set
+`streaminit(20260824)` for anything random, write one program that reruns top-to-bottom, and state what each
+result does and does not show. The recurring test is the one to bring to your own data: *would someone else be
+able to understand, rerun, and verify this?* If your project can answer yes at every hand-off, you have done
+what the course set out to teach.
+
+## See also
+
+- Previous week: [Week 14 — reproducible SAS analysis report](week-14-reproducible-sas-analysis-report.qmd) —
+  the full pipeline as one program with an ODS report and verification notes, which this week reviews.
+- Earlier anchors of the workflow:
+  [Week 5 — importing, cleaning, and validating](week-05-importing-cleaning-validating.qmd) (the 210 → 200
+  stage), [Week 6 — PROC SQL and joins](week-06-proc-sql-and-joins.qmd) (the 594-versus-596 join),
+  [Week 9 — t-tests, ANOVA, and group comparisons](week-09-ttests-anova-group-comparisons.qmd) (the $t = -4.27$
+  result), and
+  [Week 11 — logistic regression and categorical outcomes](week-11-logistic-regression-categorical.qmd) (the
+  odds-ratio-is-not-a-risk-ratio caution).
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, dataset, key, grain, character vs
+  numeric, and the log levels, in one place.
+- [PROC reference](../resources/proc-reference.qmd) — every course procedure side by side, each with its
+  verification check.
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE / WARNING / ERROR and
+  checking row counts before and after a join.

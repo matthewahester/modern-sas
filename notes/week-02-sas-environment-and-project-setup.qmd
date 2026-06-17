@@ -1,0 +1,489 @@
+---
+title: "Week 2 — SAS environment and project setup"
+subtitle: "SAS Studio, a library, a first program, the log, and project organization"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — SAS Studio (interface and running programs) — supports opening the environment and finding the log and results"
+  - "SAS documentation — LIBNAME statement — supports assigning a library to a project data folder"
+  - "SAS documentation — PROC CONTENTS — supports inspecting a dataset's variables, types, and row count"
+  - "SAS documentation — PROC PRINT — supports listing rows for a first eyes-on check"
+toc: true
+---
+
+## The week question
+
+Last week you saw *what* SAS is for: a professional environment for moving messy data to documented,
+re-runnable analytic results, where reliability and traceability matter more than any one clever line of code.
+This week the question gets practical and concrete: **how do you actually sit down in SAS, point it at a
+folder of data, run your first program, and confirm from the log that it did what you meant?** Almost
+everything later in the course — importing, cleaning, joining, summarizing, modeling — runs through the four
+moves you set up this week: open the environment, assign a **library** so SAS can find your data, run a small
+program, and **read the log** to verify the result before you trust it. We will do this on a slice of the
+recurring `wellness-program study`, then organize a project so the whole thing reruns top-to-bottom for you —
+and for the next person who has to check your work.
+
+## Why this matters
+
+It is tempting to treat "setup" as a chore to rush through on the way to the interesting procedures. Resist
+that. The setup *is* the workflow, and three things make it matter. First, a SAS analysis lives or dies by
+where its data are and whether SAS can reach them: a **library** (`libname`) is the named bridge from a SAS
+program to a folder on disk, and most beginners' first error — *"file not found"*, *"libref is not assigned"*
+— is really a setup error, not a statistics error. Get the bridge right once and dozens of later steps just
+work. Second, the **log is the primary output of SAS**, not an afterthought. SAS will happily produce a
+results table from a program that silently dropped half your rows; only the log tells you it read 210
+observations and wrote 200. Reading the log is the single habit that separates a result you can defend from a
+result you merely have. Third, an analysis you ran by clicking around — import here, point-and-click there —
+cannot be rerun or verified by anyone, including future-you. Organizing the work as **one program that runs
+start to finish against a known project folder** is what makes it reproducible. The recurring test of this
+course is "could someone else understand, rerun, and verify this?", and that test is won or lost at setup.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Open the course-designated SAS environment (SAS Studio via SAS OnDemand for Academics or SAS Viya for
+  Learners) and identify its three working panes — where you **write code**, where the **log** appears, and
+  where the **results** appear.
+- Assign a **library** with a `LIBNAME` statement that points a *libref* at a project data folder, and explain
+  the difference between a permanent library and the temporary `WORK` library.
+- Write and run a first, complete SAS program — a `LIBNAME`, a `DATA` step, and a `PROC` — that runs
+  top-to-bottom with no manual point-and-click.
+- **Read the log** to verify a step: locate the `NOTE` lines that report how many observations were read and
+  how many the dataset has, and distinguish `NOTE` / `WARNING` / `ERROR`.
+- Run a **verification check** after a step — confirm the row count and the variable **types** with
+  `PROC CONTENTS`, and check for missing values — instead of trusting the results table on sight.
+- Organize a SAS project into folders (data, code, output, docs) and describe why this layout, plus one
+  re-runnable program, is what makes the analysis reproducible.
+
+## Core vocabulary
+
+This week's terms are the environment-and-setup vocabulary. They mirror the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd); keep *library*, *libref*, *dataset*,
+*observation*, and *variable* distinct in both words and code.
+
+- **SAS Studio** — the browser-based SAS programming interface you write and run programs in (delivered through
+  SAS OnDemand for Academics or SAS Viya for Learners). It has a **code** editor, a **log**, and a **results**
+  view.
+- **Library** — a collection of SAS datasets that lives in one folder, made visible to SAS by a `LIBNAME`
+  statement. A library is the named bridge from a program to a folder of data on disk.
+- **Libref** — the short nickname you give a library (here `well`). You then refer to a dataset as
+  `libref.name`, e.g. `well.participants`.
+- **`WORK` library** — the built-in **temporary** library. Datasets in `WORK` (referred to as `participants`
+  or `work.participants`) are scratch copies that **vanish when the session ends**. Permanent data needs a
+  `LIBNAME` to a real folder.
+- **Dataset** — a SAS data table, written `libref.name`. It holds **observations** (rows) and **variables**
+  (columns), each variable being **character** or **numeric** (a load-bearing distinction).
+- **The log** — SAS's running record of what each step did. It prints **`NOTE`** (informational, e.g. "n
+  observations read"), **`WARNING`** (something may be wrong), and **`ERROR`** (the step failed). The log is
+  primary output; read it every time.
+- **`PROC CONTENTS`** — the procedure that reports a dataset's *metadata*: how many observations and variables
+  it has, and each variable's name, **type** (Char/Num), length, format, and label. The fastest verification
+  of "is this dataset what I think it is?"
+- **Reproducible program** — one program that runs top-to-bottom, from `LIBNAME` to final output, with no
+  manual steps, so anyone can rerun and verify it.
+
+## Concept development
+
+### Opening SAS Studio and finding the three panes
+
+You will not install anything heavy. The course-designated environment is **SAS Studio**, delivered in the
+browser through **SAS OnDemand for Academics** or **SAS Viya for Learners** (the exact access path is a
+syllabus placeholder confirmed in [SAS access & project setup](../resources/sas-access-setup.qmd) — provisioning
+is not finalized in this build, so treat the access route there as the source of truth). Once you are signed
+in and have opened a new SAS program, orient yourself to three regions of the screen, because every later
+move lands in one of them:
+
+- the **code editor**, where you type the program and click **Run** (the running-figure button);
+- the **`LOG`** tab, SAS's narrated record of what just happened — *this is where you verify*;
+- the **`RESULTS`** tab, where formatted tables and (later) graphs appear.
+
+There is also a **navigation/libraries** pane that lists the libraries SAS currently knows about; after you run
+a `LIBNAME`, your library shows up there. The discipline to build now: after every Run, glance at **RESULTS**
+for the answer, but *read the **LOG*** for the verification. A green, table-filled Results tab next to a log
+full of `WARNING`s is not a success.
+
+```sas
+/* A first, do-nothing program just to learn the Run button and the log. */
+proc options option=work;        /* prints where the temporary WORK library lives */
+run;
+```
+
+What the **log** should say: a short `NOTE` block naming the `WORK` location and a `NOTE: PROCEDURE OPTIONS used`
+line with a tiny `real time`, **no `WARNING` and no `ERROR`**. That clean run is the baseline; from here on, "did
+it work?" always means "what does the log say?"
+
+### Assigning a library: the `LIBNAME` bridge
+
+Your data sit in a folder. SAS reaches that folder through a **library**. The `LIBNAME` statement gives a
+folder a short **libref**; after that, `well.participants` means "the dataset `participants` in the folder I
+called `well`."
+
+```sas
+/* Point the libref `well` at the project's data folder.
+   Use YOUR own path; this one is illustrative. */
+libname well "/home/u_you/wellness/data";
+run;
+```
+
+Synthetic SAS log (synthetic, not executed):
+
+```text
+NOTE: Libref WELL was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: /home/u_you/wellness/data
+```
+
+That one `NOTE` is the whole verification for this step: SAS found the folder and bound the libref. If instead
+you see `ERROR: Library WELL does not exist` or `ERROR: Libref WELL is not assigned`, the path is wrong or the
+folder is missing — a **setup** problem to fix before any analysis. The contrast to hold onto: a dataset you
+create *without* a libref, like `data participants;`, lands in the temporary **`WORK`** library and is gone
+when the session ends; a dataset created as `data well.participants;` is **permanent** because `well` points
+at a real folder. Permanent data, real `LIBNAME`; scratch data, `WORK`.
+
+### Running a first program — and reading the log to verify it
+
+Now write a complete, re-runnable first program: assign the library, create a small dataset, and look at it.
+Here we hand-enter a few synthetic rows with `datalines` so the step is self-contained (next week you import a
+real file). All data are **synthetic; seed `streaminit(20260824)`** and stand in for the `wellness-program
+study` — not real health data.
+
+```sas
+options validvarname=v7;                 /* predictable variable names */
+libname well "/home/u_you/wellness/data";
+
+/* Create a tiny permanent dataset of participants (synthetic). */
+data well.participants_demo;
+  length sex $1 site $7 arm $10;
+  input participant_id age sex $ site $ arm $ baseline_bmi;
+  datalines;
+1001 54 F North coaching   27.4
+1002 38 M South usual_care 31.1
+1003 47 F Central coaching 24.8
+1004 61 M North usual_care 29.0
+;
+run;
+
+/* First eyes-on check: list the rows. */
+proc print data=well.participants_demo;
+run;
+```
+
+Synthetic SAS log (synthetic, not executed):
+
+```text
+NOTE: Libref WELL was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: /home/u_you/wellness/data
+NOTE: The data set WELL.PARTICIPANTS_DEMO has 4 observations and 6 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+
+NOTE: There were 4 observations read from the data set WELL.PARTICIPANTS_DEMO.
+NOTE: PROCEDURE PRINT used (Total process time):
+      real time           0.02 seconds
+```
+
+What the **log** should say, and what you **check**: the line `NOTE: The data set WELL.PARTICIPANTS_DEMO has 4
+observations and 6 variables` confirms the DATA step **created the rows and columns you expected** — four rows
+in, four rows stored, six variables. The `PROC PRINT` line `There were 4 observations read` confirms it then
+**read all four back**. No `WARNING`, no `ERROR`. The workflow move just completed: *created* a permanent
+dataset via the `well` library, then *verified* the count from the log rather than assuming it. If the DATA
+step had said `3 observations` you would stop and find the dropped row — the log caught it, the Results tab
+would not have.
+
+### Verifying structure with `PROC CONTENTS` — types are load-bearing
+
+`PROC PRINT` shows you rows; it does **not** tell you whether `age` is stored as a number or as text. That
+distinction is load-bearing in SAS: a number accidentally stored as **character** will silently block
+`PROC MEANS` and every later calculation. `PROC CONTENTS` is the verification tool that reports each variable's
+**type**.
+
+```sas
+proc contents data=well.participants_demo;
+run;
+```
+
+Output (synthetic, not executed):
+
+```text
+                            The CONTENTS Procedure
+
+Data Set Name   WELL.PARTICIPANTS_DEMO        Observations          4
+Member Type     DATA                          Variables             6
+
+         Variables in Creation Order
+
+ #   Variable         Type    Len
+ 1   participant_id    Num       8
+ 2   age               Num       8
+ 3   sex               Char      1
+ 4   site              Char      7
+ 5   arm               Char     10
+ 6   baseline_bmi      Num       8
+```
+
+What to **check**: the **Observations** count (4) and, crucially, the **Type** column — `participant_id`,
+`age`, and `baseline_bmi` are **Num**; `sex`, `site`, `arm` are **Char**. That is exactly right for this study:
+`age` and `baseline_bmi` are numeric so they can be averaged, and `arm` is character so it can group a t-test
+later. If `age` had come back **Char**, `PROC MEANS` would fail and you would fix the type *now*, at setup —
+not three weeks later when an average mysteriously will not compute. Naming the type every time it matters is a
+course habit; `PROC CONTENTS` is how you confirm it.
+
+### Organizing the project so it reruns
+
+A reliable analysis needs more than a working program — it needs a **place** to live. Organize each project
+into a small, predictable folder tree and keep one driver program that runs against it:
+
+```text
+wellness/
+  data/      raw and cleaned SAS datasets   (the `well` library points here)
+  code/      the .sas program(s)
+  output/    exported tables, ODS PDF/RTF reports
+  docs/      notes, a README, the verification log
+```
+
+The payoff: your `LIBNAME` points at `wellness/data`, your program lives in `wellness/code`, every result is
+written to `wellness/output`, and a reader opens `docs/README` to learn how to rerun it all. Nothing depends on
+a click you made and forgot. This is the antidote to the two failure modes this week targets — a
+**non-reproducible, point-and-click analysis**, and **ignoring the log**. One folder tree, one top-to-bottom
+program, one habit of reading the log: that is the whole setup, and it is what makes the test "could someone
+else rerun and verify this?" answerable with yes.
+
+## Worked examples
+
+### Worked example — the `wellness-program study`: bring up the library and verify the participants dataset
+
+**The task.** You have received the `wellness-program study` data. Assign the `well` library to the project's
+data folder, confirm the **`participants`** dataset is the one you expect, and verify its structure *before*
+doing any analysis. (Data are **synthetic; seed `streaminit(20260824)`**; the study is observational and **not
+real health data**.) The locked facts for `participants` are: **210 raw rows imported, cleaned to 200 unique
+participants** (8 duplicate-`participant_id` rows and 2 internal test rows removed), with eight variables.
+
+**The code.**
+
+```sas
+options validvarname=v7;
+libname well "/home/u_you/wellness/data";
+
+/* Inspect the cleaned participants dataset's structure and a few rows. */
+proc contents data=well.participants;
+run;
+
+proc print data=well.participants(obs=5);
+run;
+```
+
+Synthetic SAS log (synthetic, not executed):
+
+```text
+NOTE: Libref WELL was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: /home/u_you/wellness/data
+NOTE: There were 200 observations read from the data set WELL.PARTICIPANTS.
+NOTE: PROCEDURE CONTENTS used (Total process time):
+      real time           0.03 seconds
+
+NOTE: There were 5 observations read from the data set WELL.PARTICIPANTS.
+NOTE: PROCEDURE PRINT used (Total process time):
+      real time           0.02 seconds
+```
+
+Output (synthetic, not executed) — abbreviated `PROC CONTENTS`:
+
+```text
+Data Set Name   WELL.PARTICIPANTS             Observations          200
+Member Type     DATA                          Variables             8
+
+ #   Variable         Type    Len   Label
+ 1   participant_id    Num       8   Participant ID
+ 2   age               Num       8   Age (years)
+ 3   sex               Char      1   Sex
+ 4   site              Char      7   Screening site
+ 5   arm               Char     10   Program arm
+ 6   enroll_date       Num       8   Enrollment date
+ 7   baseline_bmi      Num       8   Baseline BMI
+ 8   region            Char      8   Region
+```
+
+**The verification check.** Read the log first: `There were 200 observations read` matches the locked **200
+cleaned participants** — so this is the *cleaned* table, not the raw 210-row import (if the log had said 210,
+you would be pointing at the wrong dataset and would stop here). Then read the structure: **8 variables**, with
+the key types correct — `participant_id`, `age`, `baseline_bmi`, and `enroll_date` are **Num**, while `sex`,
+`site`, `arm`, `region` are **Char**. Note `enroll_date` is **numeric**, as a SAS date must be (a date is a
+number shown with a date format) — a point you fix and format properly next week. As a quick sanity step you
+would also check missingness later with `proc means data=well.participants n nmiss;`.
+
+**The interpretation.** Before computing a single statistic, you have *verified the data are what you think
+they are*: the right dataset (200 rows, not 210), the right shape (8 variables), and the right types (numbers
+numeric, categories character). That is the workflow move this week is about — the library bridged the program
+to the folder, `PROC CONTENTS` and the log confirmed the contents, and you have earned the right to trust the
+table. Nothing here is a health finding; it is a structural check on synthetic, observational data.
+
+### Worked example — transfer: stand up a second mini-project's library and verify a different table
+
+**The task.** A new, unrelated synthetic project lands on your desk: a small **campus library checkout** log
+(a *deliberately different context and a different table* from the wellness study). You must organize its
+folders, assign its own library, create the dataset, and verify it — the *same* setup workflow, new content.
+Data are **synthetic; seed `streaminit(20260824)`**.
+
+**The code.**
+
+```sas
+options validvarname=v7;
+
+/* A separate project gets its OWN libref and its OWN data folder. */
+libname lib "/home/u_you/checkouts/data";
+
+data lib.checkouts;
+  length branch $8 item_type $7 status $9;
+  input checkout_id branch $ item_type $ days_out status $;
+  datalines;
+9001 East  book     14 returned
+9002 West  dvd       7 overdue
+9003 East  book     21 returned
+9004 North ebook     3 returned
+9005 West  book     10 overdue
+;
+run;
+
+proc contents data=lib.checkouts;
+run;
+```
+
+Synthetic SAS log (synthetic, not executed):
+
+```text
+NOTE: Libref LIB was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: /home/u_you/checkouts/data
+NOTE: The data set LIB.CHECKOUTS has 5 observations and 5 variables.
+NOTE: There were 5 observations read from the data set LIB.CHECKOUTS.
+NOTE: PROCEDURE CONTENTS used (Total process time):
+      real time           0.02 seconds
+```
+
+Output (synthetic, not executed) — abbreviated:
+
+```text
+Data Set Name   LIB.CHECKOUTS                 Observations          5
+Member Type     DATA                          Variables             5
+
+ #   Variable      Type    Len
+ 1   checkout_id    Num       8
+ 2   branch         Char      8
+ 3   item_type      Char      7
+ 4   days_out       Num       8
+ 5   status         Char      9
+```
+
+**The verification check.** The log's `has 5 observations and 5 variables` matches the five rows you typed —
+nothing was dropped. `PROC CONTENTS` confirms `checkout_id` and `days_out` are **Num** (so `days_out` can be
+averaged) and `branch`, `item_type`, `status` are **Char** (so they can group counts). A separate `libref`
+(`lib`, pointing at `checkouts/data`) keeps this project's data cleanly apart from the wellness library `well`
+— no path collisions, each project self-contained.
+
+**The interpretation.** The point of the transfer is that **the setup workflow does not change with the
+subject**: assign a library, create the data in it, then verify the row count from the log and the types from
+`PROC CONTENTS`. Whether the rows are wellness screenings or library checkouts, the same four moves — open,
+assign, run, verify — give you a project you can rerun and a reader can check. The skill is the workflow, not
+the dataset.
+
+## A common mistake
+
+The defining trap of this week is the **non-reproducible, point-and-click analysis that nobody read the log
+for** — the two failure modes braided together. It shows up like this: you import a file by clicking through
+the Studio import wizard, get a Results table, screenshot it, and move on — never assigning a `LIBNAME`, never
+reading the log, never running `PROC CONTENTS`. Three concrete ways that bites:
+
+- **The libref evaporates.** A library assigned only by a wizard click, or a `WORK` dataset you forgot was
+  temporary, is gone next session — and your "program" cannot recreate it because the step was never written
+  down. Fix: assign the library with a `LIBNAME` **statement** in the program, and put permanent data in a
+  real library, not `WORK`.
+- **A silent row drop you never saw.** SAS read 210 rows but your dataset has 200 — which is correct *only if*
+  you meant to remove the 10, and a disaster otherwise. The Results tab will not warn you; the **log line**
+  `There were 210 observations read` next to `has 200 observations` is the only evidence. Fix: read the log's
+  observation counts every run, and reconcile them against what you expect.
+- **A type problem stored in.** A number imported as **character** prints fine in `PROC PRINT` but fails the
+  moment you average it. Fix: run `PROC CONTENTS` as a verification step and confirm the **Type** column before
+  you trust the data.
+
+The cure for all three is one sentence: **write it as a program that reruns top-to-bottom, and read the log to
+verify each step.** A rendered Results table is a claim; the log and a `PROC CONTENTS` check are the evidence.
+(And remember the build-wide caveat: in these notes the logs and output are hand-authored and *not executed*, so
+even a clean-looking listing here is unverified — see the status section below.)
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, nothing to submit.
+
+1. In your own words, what does a `LIBNAME` statement do, and what is the difference between a dataset stored in
+   the `well` library and one stored in `WORK`? Which one survives to the next session?
+2. After running a DATA step, which log line tells you how many rows the new dataset has? Write out the form of
+   that `NOTE` line for a dataset with 200 observations and 8 variables.
+3. You run `proc means data=well.participants;` and it errors that `age` is not numeric. Which earlier
+   verification step would have caught this, and what would you have looked at in its output?
+4. Sketch the four project folders this week recommends and say, in a sentence each, what belongs in `data/`,
+   `code/`, `output/`, and `docs/`. Where does the `well` library's `LIBNAME` point?
+5. A classmate says "the Results tab looked right, so the program worked." Name two things the Results tab will
+   *not* tell you that the **log** (or `PROC CONTENTS`) will.
+6. The wellness import shows `210 observations read` but the stored dataset `has 200 observations`. Give one
+   reading of that gap that is *correct by design* and one that would be a *bug*, and say how you would tell them
+   apart.
+
+## Reading and source pointer
+
+For this week's procedures, the relevant **SAS documentation** pages are: the **SAS Studio** documentation on
+the interface and running a program (the code / log / results panes); the **`LIBNAME` statement** documentation
+on assigning a library to a folder; the **`PROC CONTENTS`** documentation on reporting a dataset's variables,
+types, and observation count; and the **`PROC PRINT`** documentation on listing observations. Use these as a
+reading pointer — go to the page, read the syntax and the usage notes, and write your check in your own words;
+"learning to check the documentation" is itself a course skill. Background access details (which SAS academic
+offering to use, and how) live in [SAS access & project setup](../resources/sas-access-setup.qmd).
+
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are **hand-authored,
+synthetic, and were NOT run** — SAS is proprietary and is not executed in this build environment. The course
+**SAS execution/output gate is BLOCKED**; a rendered, syntax-highlighted code block or a typed log/output
+listing is **not** evidence that the code runs or that the numbers are right. The load-bearing items here — the
+`wellness-program study` figures (**210 raw rows imported, cleaned to 200 unique participants**, **8 variables**
+in `participants`, the **Num/Char** types shown, and `enroll_date` as a numeric date), the synthetic `NOTE`
+lines reporting observation counts, and the small `participants_demo` / `checkouts` listings — are drafted "as
+if run" and are flagged **synthetic; seed `streaminit(20260824)`**. The data are not real health data and the
+study is observational. Do not treat any value here as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we go deeper into the pieces you just stood up: **libraries, datasets, variable attributes, labels,
+and formats**. You will give variables labels and display formats, and — critically — turn that character
+`enroll_date` like `"08/24/2026"` into a real SAS **date** with the `MMDDYY10.` informat, then display it with
+a date format. The setup you built this week (a library, a program that reruns, the habit of reading the log)
+is the foundation every one of those moves stands on.
+
+## See also
+
+- Previous week: [Week 1 — What SAS is for now](week-01-what-sas-is-for-now.qmd) — the analytics workflow and a
+  first log read.
+- Next week: [Week 3 — Libraries, datasets, variables, labels, formats](week-03-libraries-datasets-variables-formats.qmd)
+  — variable attributes and the `enroll_date` informat/format.
+- [SAS access & project setup](../resources/sas-access-setup.qmd) — how to reach the course's SAS environment
+  and the project-folder convention.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library vs libref vs dataset vs observation
+  vs variable; character vs numeric.
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — reading `NOTE` / `WARNING` /
+  `ERROR` and the row-count check.

@@ -1,0 +1,462 @@
+---
+title: "Week 3 — Libraries, datasets, variables, labels, and formats"
+subtitle: "Where data live and how SAS describes it (compressed Labor Day week)"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — LIBNAME statement — supports pointing a libref at a folder of permanent datasets"
+  - "SAS documentation — PROC CONTENTS — supports reading a dataset's metadata (variables, types, lengths, formats)"
+  - "SAS documentation — FORMAT and INFORMAT (including the date informats/formats) — supports reading and displaying values"
+toc: true
+---
+
+::: {.callout-important}
+**Compressed week.** Labor Day (Monday, September 7) is a campus holiday with no class, so Week 3 runs on the
+**Wednesday/Friday** rhythm only. The same workflow ideas apply — there is just one less meeting to spread
+them across, so the reading and self-checks below carry a little more of the load this week.
+:::
+
+## The week question
+
+In Week 2 you opened the SAS environment, pointed a `libname` at a folder, ran a first program, and read its
+log. You made data *appear*. This week asks the next, quieter question that every reliable analysis depends
+on: **once data live somewhere in SAS, how does SAS describe them — and how do you read that description back
+to check that the data are what you think they are?** A SAS dataset is not just a grid of values. Each column
+carries *metadata*: a name, a **type** (character or numeric), a **length**, an optional **label**, and an
+optional **format** that controls how the stored value is displayed. A date is the sharpest case — SAS stores
+it as a plain number and only *shows* it as a calendar date because a format is attached. This week you learn
+to read that metadata with **PROC CONTENTS**, to attach labels and formats so output is readable, and to read
+the `enroll_date` column correctly with an **informat** on the way in and a **format** on the way out. The
+throughline is the course's recurring test: *would someone else be able to open this library, read what each
+variable is, and trust it?*
+
+## Why this matters
+
+Almost every confusing SAS result traces back to a variable being something other than what you assumed. A
+column you thought was numeric is actually character, so `PROC MEANS` silently drops it. A date "looks wrong"
+because the value `20693` was never given a date format. A merge or a procedure behaves strangely because a
+key variable has a different **length** in two datasets and the values get truncated. None of these are
+statistics problems — they are *metadata* problems, and they are invisible until you look. PROC CONTENTS is
+how you look. It matters here for three reasons. First, it makes **type** explicit, and in this course
+character-vs-numeric is load-bearing: it decides which procedures will even run. Second, it shows **formats and
+informats**, which separate how a value is *stored* from how it is *read in* and *displayed* — the distinction
+that makes dates, currency, and coded categories behave. Third, reading metadata is itself a **verification
+move**: before you trust a single summary statistic, you confirm the library is connected, the dataset has the
+rows and columns you expect, and each variable is the type you intended. Get the description right in Week 3 and
+the DATA step (Week 4), the import-and-clean pass (Week 5), and the joins (Week 6) all rest on solid ground.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Assign a **library** with a `LIBNAME` statement and explain the difference between a *libref*, a *dataset*
+  (`libref.name`), an *observation* (row), and a *variable* (column).
+- Run **PROC CONTENTS** on a dataset and read its metadata: the observation and variable counts, and each
+  variable's **type**, **length**, **label**, and **format**.
+- State why **character vs numeric** is load-bearing — and recognize the symptom of getting it wrong (a
+  number stored as character that a numeric procedure will not summarize).
+- Distinguish a **format** (controls *display* of a stored value) from an **informat** (controls how raw input
+  is *read*), and explain why a SAS **date is a number** displayed with a date format.
+- Read `enroll_date` from the character string `"08/24/2026"` with the `MMDDYY10.` informat and display the
+  resulting SAS date with `DATE9.`, then verify the conversion.
+- Attach **labels** and a user-defined **format** (via `PROC FORMAT`) so output is readable, and confirm with
+  PROC CONTENTS that the attributes actually landed on the variable.
+- Treat reading metadata as a verification step: confirm the library is connected, the counts match
+  expectations, and every variable's type is what you intended — and say so in a verification note.
+
+## Core vocabulary
+
+The week's SAS terms, defined plainly. These mirror the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd); keep *library*, *dataset*, *variable*, and
+*format* distinct in words and in code.
+
+- **Library / libref** — a *library* is a collection of SAS datasets in one location (usually a folder on
+  disk); the *libref* is the short nickname you assign it with `LIBNAME`. `WORK` is the built-in temporary
+  library (cleared when SAS closes); a libref you create — say `well` — points at a folder of **permanent**
+  datasets that survive between sessions.
+- **Dataset** — a SAS table, named `libref.name` (for example `well.participants`). A dataset has
+  **observations** (rows) and **variables** (columns), plus a *descriptor portion* (the metadata) and a *data
+  portion* (the values).
+- **Variable** — a column. Every variable has a **name**, a **type** (character or numeric), a **length** (the
+  bytes reserved per value), an optional **label**, and an optional **format**/**informat**.
+- **Type** — **character** or **numeric**. Character values hold text (and missing is blank `" "`); numeric
+  values hold numbers, including dates, and missing is a single dot `.`. Type is load-bearing: numeric
+  procedures will not summarize a character column.
+- **Label** — a longer, human-readable description SAS shows on output in place of the short variable name
+  (for example labeling `baseline_bmi` as "Baseline BMI (kg/m²)"). It changes *display*, never the stored
+  name or value.
+- **Format** — a rule that controls how a *stored* value is **displayed** (for example `DATE9.` shows the
+  number `20693` as `24AUG2026`; `DOLLAR8.2` shows `1234.5` as `$1,234.50`). The stored value never changes.
+- **Informat** — a rule that controls how raw input is **read in** and converted to a stored value (for
+  example `MMDDYY10.` reads the text `"08/24/2026"` and stores the SAS date number). Informats are about input;
+  formats are about output.
+- **SAS date** — a **number**: the count of days since January 1, 1960. `24AUG2026` is stored as a single
+  integer and only *looks* like a date because a date format is attached. Do dates arithmetic on the number,
+  display it with a format.
+- **PROC CONTENTS** — the procedure that prints a dataset's descriptor (metadata): library, member, number of
+  observations and variables, and a per-variable table of type, length, label, and format. Your primary
+  "what is in here?" tool.
+
+## Concept development
+
+### Libraries, librefs, and the `libref.name` dataset
+
+A library is just a folder that SAS knows about. You assign it a short nickname — the **libref** — and from
+then on every dataset in that folder is addressed as `libref.name`. For the recurring study, point a libref
+named `well` at the project's data folder and you can refer to `well.participants` and `well.screenings`.
+
+```sas
+/* Assign a permanent library; turn on standard variable-name handling */
+options validvarname=v7;
+
+libname well "C:\stat44203\wellness\data";
+
+/* A reproducible program addresses data by libref.name, never by clicking */
+proc contents data=well.participants;
+run;
+```
+
+**What the log should say.** A successful `LIBNAME` writes a `NOTE: Libref WELL was successfully assigned`
+line naming the physical folder. If the path is wrong you get `ERROR: Library WELL does not exist` — the
+library never connected, and nothing downstream will run.
+
+```text
+SAS log (synthetic)
+NOTE: Libref WELL was successfully assigned as follows:
+      Engine:        V9
+      Physical Name: C:\stat44203\wellness\data
+NOTE: PROCEDURE CONTENTS used (Total process time):
+      real time           0.03 seconds
+```
+
+**What to check.** Confirm the libref assigned (the `NOTE`, not an `ERROR`) and that the physical path is the
+one you meant. The libref is a *session* nickname — it must be re-assigned each time you open SAS, which is why
+the `LIBNAME` lives at the top of a reproducible program rather than being set by point-and-click.
+
+### Reading metadata with PROC CONTENTS
+
+PROC CONTENTS prints the *descriptor* portion of a dataset: how many observations and variables it has, and,
+for each variable, its type, length, label, and format. This is the first thing to run on any dataset you did
+not just create yourself — and a good thing to run on data you *did* create, to confirm the attributes are
+what you intended.
+
+```sas
+proc contents data=well.participants varnum;
+run;
+```
+
+The `VARNUM` option lists variables in their *position* order (column order) rather than alphabetically, which
+is usually how you want to read a table.
+
+```text
+Output (synthetic, not executed)
+                          The CONTENTS Procedure
+
+   Data Set Name      WELL.PARTICIPANTS         Observations          200
+   Member Type        DATA                      Variables             8
+   Engine             V9                         Indexes              0
+
+           Variables in Creation Order
+   #  Variable        Type    Len   Format       Label
+   1  participant_id  Num       8                Participant ID
+   2  age             Num       8                Age (years)
+   3  sex             Char      1                Sex (F/M)
+   4  site            Char      7                Screening site
+   5  arm             Char     10                Program arm
+   6  enroll_date     Num       8   DATE9.       Enrollment date
+   7  baseline_bmi    Num       8                Baseline BMI (kg/m^2)
+   8  region          Char     12                Region
+```
+
+**What to check.** Three things, in order. (1) **Counts:** `Observations 200`, `Variables 8` — these are the
+locked cleaned counts for `participants`; if you saw 210 you are looking at the raw, un-cleaned import, and if
+you saw some other number something went wrong upstream. (2) **Types:** `participant_id` and `age` are `Num`,
+`sex`/`site`/`arm`/`region` are `Char` — exactly as intended, because type decides which procedures will run.
+(3) **The date:** `enroll_date` is `Num` with a `DATE9.` **format** — it is stored as a number and *displayed*
+as a date, which is the whole point of the next subsection. Reading these three lines *is* a verification move:
+you have confirmed the library connected, the table has the rows and columns you expect, and every variable is
+the type you meant.
+
+### Format vs informat — and why a date is a number
+
+This is the week's central distinction. An **informat** governs how raw text is **read in**; a **format**
+governs how a stored value is **displayed**. They are not interchangeable, and the date variable is where the
+difference becomes concrete. In the raw file, `enroll_date` arrives as the *character string* `"08/24/2026"`.
+Left as character it is useless for sorting or date arithmetic. You read it with the `MMDDYY10.` informat,
+which parses the text and stores the SAS date *number* (days since 1960-01-01); then you attach the `DATE9.`
+*format* so the number prints as `24AUG2026` instead of as a bare integer.
+
+```sas
+data well.participants_dt;
+    set well.participants_raw;        /* enroll_date_chr is character "08/24/2026" */
+    /* informat reads the text -> a SAS date number */
+    enroll_date = input(enroll_date_chr, mmddyy10.);
+    /* format controls how that number is displayed */
+    format enroll_date date9.;
+    label  enroll_date = "Enrollment date";
+run;
+```
+
+**What the log should say.** A clean run reports the rows read and written and *no* `NOTE: Invalid data`
+lines. A bad informat — say the text were `"2026-08-24"` but you used `MMDDYY10.` — would log
+`NOTE: Invalid data for enroll_date_chr in line ...` and set those values to missing. That note is the signal
+that your *informat* did not match the raw layout.
+
+```text
+SAS log (synthetic)
+NOTE: There were 200 observations read from the data set WELL.PARTICIPANTS_RAW.
+NOTE: The data set WELL.PARTICIPANTS_DT has 200 observations and 9 variables.
+NOTE: No invalid-data notes were generated for enroll_date.
+```
+
+**What to check.** Confirm the row count is unchanged (200 in, 200 out — you are converting a column, not
+filtering rows), confirm there are **no `Invalid data` notes**, and spot-check one value: the string
+`"08/24/2026"` should become the SAS date that *displays* as `24AUG2026`. A quick way to verify is to print
+the column twice, once formatted and once with `BEST12.` to expose the underlying integer, so you can see the
+number and its display side by side. The stored value is a number; the calendar appearance is just a format.
+
+### Labels and user-defined formats with PROC FORMAT
+
+Two attributes make output readable without changing a single stored value. A **label** replaces the terse
+variable name on output. A **user-defined format**, built with `PROC FORMAT`, maps stored codes to readable
+text on display — useful when a variable is coded but you want labels in tables. Crucially, both are *display*
+layers: the data underneath stay exactly as stored, so analysis is unaffected and you can always recover the
+raw value.
+
+```sas
+/* Map the goal_met code (1/0) to readable labels for display only */
+proc format;
+    value goalfmt 1 = "Goal met"
+                  0 = "Goal not met";
+run;
+
+data screenings_lbl;
+    set well.screenings;
+    label    goal_met = "Visit goal met (1=yes)";
+    format   goal_met goalfmt.;
+run;
+```
+
+**What to check.** Run PROC CONTENTS on `screenings_lbl` and confirm the `goal_met` row now shows the label
+and the `GOALFMT.` format — the attributes *landed* on the variable. Then confirm the **stored values are
+still numeric 1/0**: a user-defined format changes how `goal_met` *prints* (you now see "Goal met"), but
+`PROC MEANS` still treats it as the number it is, so the mean of `goal_met` is still the proportion meeting
+goal. Display formatting and analysis are independent — that separation is exactly what lets you have readable
+tables *and* correct statistics at once.
+
+## Worked examples
+
+### Worked example — the wellness-program study: PROC CONTENTS of `participants`
+
+**The task.** You have just received the cleaned `participants` table (the locked **200** unique rows, **8**
+variables) in the `well` library. Before doing anything analytic, document what is in it: confirm the counts,
+confirm every variable's type, and confirm that `enroll_date` is a numeric SAS date with a date format. This
+is the *open-and-describe* step that every later week assumes was done. The data are **synthetic; seed set,
+`call streaminit(20260824)`** — the RiverCity wellness-screening study, not real health data.
+
+**The code.**
+
+```sas
+options validvarname=v7;
+libname well "C:\stat44203\wellness\data";
+
+proc contents data=well.participants varnum;
+    title "participants — metadata check";
+run;
+```
+
+**The synthetic output.**
+
+```text
+Output (synthetic, not executed)
+                participants — metadata check
+                    The CONTENTS Procedure
+
+   Data Set Name   WELL.PARTICIPANTS      Observations   200
+   Member Type     DATA                   Variables      8
+
+           Variables in Creation Order
+   #  Variable        Type    Len   Format      Label
+   1  participant_id  Num       8               Participant ID
+   2  age             Num       8               Age (years)
+   3  sex             Char      1               Sex (F/M)
+   4  site            Char      7               Screening site
+   5  arm             Char     10               Program arm
+   6  enroll_date     Num       8   DATE9.      Enrollment date
+   7  baseline_bmi    Num       8               Baseline BMI (kg/m^2)
+   8  region          Char     12               Region
+```
+
+**The verification check.** Run the three-line metadata read. (1) **Counts:** `Observations 200`,
+`Variables 8` — these match the locked cleaned counts exactly; the raw import was 210 rows (8 duplicate
+`participant_id` rows + 2 internal test rows removed in the Week 4–5 cleaning pass), so seeing 200 here is the
+evidence that you are working with the cleaned table, not the raw one. (2) **Types:** `participant_id` and
+`age` are `Num`; `sex`, `site`, `arm`, `region` are `Char`. The 2-group variable `arm` (coaching / usual_care)
+and the 3-group variable `site` (North / Central / South) are character, as expected for the grouping and
+modeling work later. (3) **The date:** `enroll_date` is `Num` with the `DATE9.` format — stored as a number,
+displayed as a date.
+
+**The interpretation.** Nothing here is a statistic yet, and that is the point: this is the **read-and-confirm**
+workflow move that earns the right to compute statistics. You have confirmed the library connected, the table
+holds the 200 rows and 8 columns you expected, and every variable is the type you intended. If `enroll_date`
+had shown up as `Char`, you would stop and fix the informat before anything else, because a character date
+cannot be sorted, differenced, or grouped by month. Documenting metadata first is what makes the later TTEST,
+GLM, REG, and LOGISTIC steps trustworthy rather than hopeful. Remember the standing caveats: the study is
+**synthetic and observational**, so any group difference you eventually find is associational, not causal —
+but none of that arises yet at the describe-the-data stage.
+
+### Worked example — transfer: a custom format on a coded variable in a survey table
+
+**The task.** Switch context to a *different* synthetic table so the idea travels. A campus **transit survey**
+(synthetic; seed set, `call streaminit(20260824)` — not the wellness study) has 320 respondents and a coded
+column `commute_mode` storing integers `1`–`4`. The numbers are fine for storage but unreadable in a
+frequency table. Attach a user-defined format so output shows mode names, and label the variable — without
+changing the stored codes, so the column can still be used as a numeric key.
+
+**The code.**
+
+```sas
+proc format;
+    value modefmt 1 = "Car"
+                  2 = "Bus"
+                  3 = "Bike"
+                  4 = "Walk";
+run;
+
+data transit_lbl;
+    set transit.survey;
+    label  commute_mode = "Primary commute mode";
+    format commute_mode modefmt.;
+run;
+
+proc contents data=transit_lbl varnum;
+run;
+```
+
+**The synthetic output.**
+
+```text
+Output (synthetic, not executed)
+                    The CONTENTS Procedure
+
+   Data Set Name   WORK.TRANSIT_LBL     Observations   320
+   Member Type     DATA                 Variables      6
+
+           Variables in Creation Order (excerpt)
+   #  Variable       Type   Len   Format     Label
+   3  commute_mode   Num      8   MODEFMT.   Primary commute mode
+```
+
+**The verification check.** PROC CONTENTS confirms `commute_mode` is still `Num` (length 8) — the stored
+values are the integers `1`–`4`, unchanged — but now carries the `MODEFMT.` format and the label. The row
+count is **320 in, 320 out**: attaching a format and a label is a display operation, so it never adds or drops
+rows. To prove the data underneath are untouched, you could run PROC FREQ with `format commute_mode;` cleared
+and see the bare `1`–`4` again.
+
+**The interpretation.** A user-defined format is a *display* convenience layered over numeric codes: the table
+reads "Car / Bus / Bike / Walk" while the variable stays the number `1`–`4` for any later join, sort, or
+model. This is the same move as labeling `goal_met` in the wellness study — readable output without sacrificing
+a usable numeric column — applied to a brand-new table. The lesson transfers because formats and labels are
+properties of *variables*, not of any one dataset: learn them once, use them everywhere.
+
+## A common mistake
+
+The week's trap is **confusing type, format, and informat** — three different things that all touch how a
+value looks, and which produce three classic failures.
+
+- **A number stored as character.** If `age` or `goal_met` came in as `Char` (often because the raw file had a
+  stray non-numeric token, or because of how it was read), `PROC MEANS` will **silently refuse to summarize
+  it** — you get an error or an empty result, not a wrong number. PROC CONTENTS is how you catch it: the `Type`
+  column says `Char` where you expected `Num`. The fix is a deliberate conversion with `input(var, best12.)`,
+  and the log will then say `NOTE: Character values have been converted to numeric ...` — a note to *verify*,
+  not ignore, because it confirms the conversion happened.
+- **A date read as character (the wrong informat, or none).** Leaving `enroll_date` as the string
+  `"08/24/2026"` — or reading it with an informat that does not match the layout — gives you a column that
+  *looks* like a date but cannot be sorted by time, differenced, or grouped by month, and a mismatched informat
+  logs `NOTE: Invalid data ... ` and quietly makes values missing. Read dates with the matching informat
+  (`MMDDYY10.` here), confirm no invalid-data notes, and attach a date *format* for display.
+- **Treating a format as if it changed the data.** A format (built-in or user-defined) changes only how a
+  value *displays*. The stored value is untouched, so `mean(goal_met)` is still the proportion even when the
+  table prints "Goal met". Conversely, an *informat* changes what gets stored. Mixing these up — expecting a
+  format to "convert" a character column, or expecting a label to alter analysis — is the root of most "why
+  did my procedure do that?" confusion this week.
+
+The umbrella rule: when output looks wrong, **run PROC CONTENTS first**. Most surprises this week are metadata
+surprises, and metadata is exactly what PROC CONTENTS exposes.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission, no key.
+
+1. Write a `LIBNAME` statement assigning the libref `well` to a folder, then a PROC CONTENTS call on
+   `well.participants`. In one sentence, what `NOTE` in the log tells you the library connected, and what
+   `ERROR` would tell you it did not?
+2. From the `participants` metadata, list which variables are `Num` and which are `Char`. Why does it matter
+   for later work that `arm` and `site` are character while `age` and `baseline_bmi` are numeric?
+3. The cleaned `participants` table has 200 observations; the raw import had 210. Where did the other 10 rows
+   go (name the two kinds removed), and which procedure would you run to confirm the count is now 200?
+4. Explain the difference between the `MMDDYY10.` **informat** and the `DATE9.` **format** for `enroll_date`,
+   and state what is stored "underneath" the displayed `24AUG2026`.
+5. You attach a user-defined format mapping `goal_met` `1 → "Goal met"`, `0 → "Goal not met"`. After this, is
+   `mean(goal_met)` still the proportion meeting goal? Why or why not?
+6. A classmate says "my `age` column won't average — PROC MEANS gives nothing." Name the single most likely
+   cause in this week's vocabulary, the one PROC CONTENTS column you would check, and the fix.
+
+## Reading and source pointer
+
+For this week's procedures, see the **SAS documentation** for the **LIBNAME statement** (assigning a libref to
+a folder of permanent datasets), for **PROC CONTENTS** (reading a dataset's descriptor — variables, types,
+lengths, labels, formats), and for **FORMAT and INFORMAT**, including the **date informats and formats** such
+as `MMDDYY10.` and `DATE9.` — these are the reference pages to consult when you need an option or an exact
+informat width. Learning to find the right page in the SAS documentation — which informat reads a given date
+layout, which option lists variables in column order — is itself a course skill; the notes point you *to* the
+page rather than reproducing it.
+
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every output value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build
+environment. The course **SAS execution/output gate is BLOCKED**: a rendered, syntax-highlighted code block or
+a typed listing is *not* evidence that the code runs or that the numbers are right. The load-bearing items
+here — the `participants` metadata (**200** observations, **8** variables; `participant_id` and `age` numeric,
+`sex`/`site`/`arm`/`region` character; `enroll_date` numeric with a `DATE9.` format read from `"08/24/2026"`
+via `MMDDYY10.`), the raw-vs-cleaned **210 → 200** row story, and the transfer table's **320** rows with a
+`MODEFMT.` format on a numeric `commute_mode` — are drafted "as if run" for this draft site and
+cross-checked only for internal and narrative consistency. All data are **synthetic; seed set
+(`call streaminit(20260824)`)** and represent the `wellness-program study` (and a notional transit survey), not
+real records; the study is observational. Do not treat any value here as a confirmed reference until the
+human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we move from *describing* data to *building and changing* it: **Week 4 — DATA step logic**. With the
+metadata vocabulary from this week in hand, you will write the DATA step that creates, cleans, and subsets
+`participants` — applying `IF/THEN` logic, handling missing values, and confronting the locked `age = 199`
+typo that has to be coerced to missing. The PROC CONTENTS habit you built this week is exactly the check you
+will run before and after that DATA step to confirm the rows and types came out as intended. Week 4 has a
+companion **Lab 4** for hands-on practice building and validating a DATA step.
+
+## See also
+
+- Previous week: [Week 2 — SAS environment and project setup](week-02-sas-environment-and-project-setup.qmd) —
+  opening SAS Studio, your first `libname`, program, log, and output.
+- Next week: [Week 4 — DATA step logic](week-04-data-step-logic.qmd) — creating, cleaning, and subsetting
+  `participants`; `IF/THEN`; missing values; the `age = 199` typo.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, libref, dataset, variable, type,
+  label, format vs informat, the PDV.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE / WARNING / ERROR
+  and the standard checks (counts, types, NMISS).
+- [PROC reference](../resources/proc-reference.qmd) — the course procedures, including PROC CONTENTS and
+  PROC FORMAT, side by side.

@@ -1,0 +1,452 @@
+---
+title: "Week 6 — PROC SQL and joins"
+subtitle: "Selecting, filtering, grouping, and joining — and checking the result"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC SQL (the SELECT statement: WHERE, GROUP BY, HAVING) — supports query, filter, and grouped-summary syntax"
+  - "SAS documentation — PROC SQL joins (inner join, left/right outer join, the ON clause) — supports combining the two study tables on a key"
+  - "SAS documentation — PROC SQL Cartesian product and join-cardinality notes — supports diagnosing an exploded or short row count"
+toc: true
+---
+
+## The week question
+
+By now you have built the `participants` table in the DATA step (week 4) and imported, cleaned, and validated
+it down from 210 raw rows to 200 unique participants (week 5). But a single table rarely answers a real
+analytic question. The wellness-program study lives in **two** tables — one row per *participant* and one row
+per *screening visit* — and almost every question you care about ("what was the average blood pressure for
+coaching-arm participants?", "which enrolled people were never screened?") needs them **combined**. This
+week's question is: **how do you select, filter, group, and join tables with PROC SQL — and how do you know
+the join did what you intended?** The headline teaching object is a single pair of numbers: an inner join of
+the two study tables returns **594** rows, a left join returns **596**, and the gap of 2 is not noise — it is
+two enrolled participants who were never screened, surfacing exactly where they should. The discipline of the
+week is to predict the row count *before* you run the join and check it *after*.
+
+## Why this matters
+
+PROC SQL is where the course turns from preparing one table to **assembling an analysis dataset** from many.
+It matters for three reasons. First, it is the most direct, most readable way in SAS to ask a question of your
+data: one `SELECT` statement can filter rows, compute group summaries, and join tables at once, with no
+pre-sorting required. Second, **joins are where silent data-loss bugs live**. A key-type mismatch, an
+unintended many-to-many relationship, or the wrong join type can quietly drop rows or multiply them, and
+nothing in the output window screams about it — the only tell is the **row count** and the **log**. Third,
+this is the spine of the recurring "could someone else rerun and verify this?" test: a join you did not
+count-check is a result on trust alone. The 594-versus-596 contrast is small enough to hold in your head and
+real enough to teach the habit that protects every later analysis — the t-tests, the regression, the logistic
+model all run on a dataset that some join produced. Get the join wrong and every downstream number inherits
+the error.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Write a PROC SQL `SELECT` query against the wellness-program tables using `WHERE` to filter rows, `GROUP BY`
+  with summary functions (`COUNT`, `MEAN`) to summarise, and `HAVING` to filter groups, ending the step with
+  `quit;`.
+- Distinguish an **inner join** (only matched keys) from a **left (outer) join** (all left-table rows, matched
+  or not), and state which one you need for a given question.
+- Predict the row count of a join from the table grains *before* running it, and **verify** the actual count
+  against that prediction afterward — the locked 594 (inner) versus 596 (left) contrast.
+- Read the PROC SQL log and output for the load-bearing lines: how many rows the query produced, a
+  Cartesian-product warning, and a count that does not match your expectation.
+- Diagnose the three classic join failures — a character-versus-numeric **key-type mismatch**, an unintended
+  **many-to-many** (Cartesian) blow-up, and an **unchecked row count** — and name the fix for each.
+- Interpret a grouped summary or a join result as an *associational, observational* statement about synthetic
+  data, never as a causal or real-health claim.
+
+## Core vocabulary
+
+Plain definitions of the week's SAS terms. Keep them straight; the join vocabulary is load-bearing.
+
+- **PROC SQL** — the SAS procedure that runs Structured Query Language inside SAS. A query is a `SELECT`
+  statement; the procedure block ends with `quit;` (not `run;`), because PROC SQL is interactive and runs each
+  statement as it is submitted.
+- **`SELECT`** — the statement that names which columns to return (or `*` for all), from which table(s), with
+  optional `WHERE`, `GROUP BY`, `HAVING`, and `ORDER BY` clauses.
+- **`WHERE`** — filters **rows** before grouping (e.g. `where arm = 'coaching'`). Operates on individual rows.
+- **`GROUP BY` + summary function** — collapses rows into groups and computes a per-group summary with
+  `COUNT(*)`, `MEAN(x)`, `SUM(x)`, etc. The **mean of a 0/1 variable is a proportion** (so `mean(goal_met)`
+  reads as a goal-met rate).
+- **`HAVING`** — filters **groups** *after* grouping (e.g. `having count(*) > 60`). `WHERE` filters rows;
+  `HAVING` filters groups — do not confuse them.
+- **Key** — the column two tables share that links their rows; here `participant_id` (numeric in both tables).
+- **Inner join** — returns only rows whose key matches in **both** tables. Unmatched keys on either side are
+  dropped.
+- **Left (outer) join** — returns **every** row from the left table, plus matched columns from the right; where
+  there is no right-side match, the right columns come back **missing**. A right join is the mirror image.
+- **Cartesian product** — what you get with no join condition (or a key that matches many-to-many): every left
+  row paired with every right row. Almost always a bug; the log warns about it.
+- **Grain (cardinality)** — what one row *means* in a table. `participants` has one row per person;
+  `screenings` has one row per person-per-visit. Joining tables of different grains changes the row count in a
+  predictable way — predict it.
+
+## Concept development
+
+### `SELECT`, `WHERE`, and `GROUP BY`: querying one table
+
+Before joining, get comfortable querying a single table. PROC SQL reads a table, applies a `WHERE` filter to
+rows, optionally groups, and returns columns. Here is a grouped count on the cleaned `participants` table
+(200 rows, the week-5 output), counting participants per `site`.
+
+```sas
+libname wp "/home/u_wellness/data";   /* permanent library for the study */
+
+proc sql;
+  select site,
+         count(*) as n_participants
+  from wp.participants
+  group by site
+  order by site;
+quit;
+```
+
+The synthetic output and the log:
+
+```text
+Output (synthetic, not executed)
+
+  site       n_participants
+  --------   --------------
+  Central                66
+  North                  70
+  South                  64
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+NOTE: There were 200 observations read from the data set WP.PARTICIPANTS.
+```
+
+**What to check.** The three group counts must sum to the table total: $66 + 70 + 64 = 200$, matching the
+locked cleaned `participants` count from week 5. The log line "200 observations read" confirms PROC SQL saw
+the whole cleaned table, not a stale copy. The workflow move here is *read what you created and confirm the
+parts add to the whole* — if these had summed to 198 or 210 you would stop and find out why before trusting
+anything downstream.
+
+### Inner join versus left join: the two tables, two row counts
+
+Now the heart of the week. The study is two tables joined on `participant_id`: `participants` (200 rows, one
+per person) and `screenings` (594 rows, one per person-per-visit, because 198 people have 3 visits each and
+2 people have none). An **inner join** keeps only person-ids present in *both* tables; a **left join** keeps
+*every* participant row, filling screening columns with missing where there was no visit.
+
+```sas
+/* inner join: only participants who were actually screened */
+proc sql;
+  create table wp.inner_joined as
+  select p.participant_id,
+         p.arm,
+         s.visit_num,
+         s.systolic_bp
+  from wp.participants as p
+       inner join wp.screenings as s
+       on p.participant_id = s.participant_id;
+quit;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: Table WP.INNER_JOINED created, with 594 rows and 4 columns.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.05 seconds
+```
+
+The inner join returns **594** rows: the 198 screened participants times their 3 visits. The two unscreened
+participants have no matching `participant_id` in `screenings`, so they are silently dropped. Now the left
+join, which keeps them:
+
+```sas
+/* left join: every participant, screened or not */
+proc sql;
+  create table wp.left_joined as
+  select p.participant_id,
+         p.arm,
+         s.visit_num,
+         s.systolic_bp
+  from wp.participants as p
+       left join wp.screenings as s
+       on p.participant_id = s.participant_id;
+quit;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: Table WP.LEFT_JOINED created, with 596 rows and 4 columns.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.05 seconds
+```
+
+**What to check.** Predict, then verify. Inner join = (screened participants) × (visits) = 198 × 3 = **594**.
+Left join = inner result + (unscreened participants, one missing-filled row each) = 594 + 2 = **596**. The two
+extra rows are the two enrolled-but-never-screened participants, who appear with `visit_num` and `systolic_bp`
+both missing. The workflow move is the cardinal one of the week: **the row count tells you which rows the join
+kept**. If you wanted "every enrolled person" and got 594, you silently lost two people; if you wanted "only
+screened visits" and got 596, you carried two empty rows into your summaries. The difference between a correct
+and a broken analysis is a number you can read off the log in one second — *if* you look.
+
+### Counting the unmatched rows directly
+
+A row-count gap is a signal; confirm what it *is* before you trust it. You can isolate the unmatched
+participants with a left join filtered to the rows where the right-side key came back missing — these are
+exactly the enrolled people with no screening.
+
+```sas
+proc sql;
+  select p.participant_id,
+         p.arm
+  from wp.participants as p
+       left join wp.screenings as s
+       on p.participant_id = s.participant_id
+  where s.participant_id is missing;   /* no right-side match */
+quit;
+```
+
+```text
+Output (synthetic, not executed)
+
+  participant_id   arm
+  --------------   ----------
+            10427   usual_care
+            10592   coaching
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 2 rows selected.
+```
+
+**What to check.** Exactly **2** rows come back, accounting for the entire 596 − 594 gap. Now the difference
+is not a mystery to wave at but two named participant-ids you can explain. The workflow move is to *turn a
+count discrepancy into a list you understand* — a 2-row gap that resolves to two specific unscreened people is
+a clean, documented edge case; a gap you cannot account for is a bug you have not found yet. Note also what
+this does **not** show: it is synthetic data, so do not read "two people skipped screening" as a real-world
+adherence finding.
+
+## Worked examples
+
+### Worked example — the wellness-program study: a grouped summary on the joined data
+
+**The task.** Using the inner-joined screening data, report the mean `systolic_bp` and the number of screening
+rows by `arm`, so you can see the coaching-versus-usual-care contrast that the formal t-test (week 9) will
+test. The data are **synthetic; seed `streaminit(20260824)`**, observational, and **not real health data**.
+
+**The code.**
+
+```sas
+proc sql;
+  select p.arm,
+         count(*)            as n_rows,
+         mean(s.systolic_bp) as mean_bp format=6.1
+  from wp.participants as p
+       inner join wp.screenings as s
+       on p.participant_id = s.participant_id
+  group by p.arm
+  order by p.arm;
+quit;
+```
+
+**The synthetic output and log.**
+
+```text
+Output (synthetic, not executed)
+
+  arm           n_rows   mean_bp
+  -----------   ------   -------
+  coaching         297     125.9
+  usual_care       297     130.8
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: Table WP.SCREENINGS read; 594 rows joined to WP.PARTICIPANTS on participant_id.
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.06 seconds
+NOTE: There were 2 rows selected.
+```
+
+**The verification check.** The two group sizes must sum to the inner-join total: $297 + 297 = 594$, matching
+the locked inner-join count — the join did not drop or duplicate rows. Each arm has 99 participants × 3 visits
+= 297 screening rows, consistent with the balanced 100/100 arm split (one participant per arm is among the two
+unscreened, so 99 screened per arm). The two arm means, **125.9** (coaching) and **130.8** (usual_care), match
+the locked baseline arm means; the difference of about −4.9 mmHg is the quantity week 9 will test formally.
+Before reporting, you would also check `NMISS(systolic_bp)` is 0 on the inner-joined data (no missing BP among
+screened visits), since `MEAN` silently skips missing values and a hidden missing would bias the comparison.
+
+**The interpretation.** Coaching-arm screening rows average about 5 mmHg lower systolic BP than usual-care
+rows in this synthetic study. That is an **association**, not a causal effect: the arms are not described as
+randomized, so the gap could reflect who enrolled in each arm rather than the coaching itself. And a
+difference being visible here is not the same as it being statistically distinguishable or practically
+important — that is what the week-9 t-test ($t = -4.27$, $p < .0001$ on the per-participant baseline slice)
+addresses, on a one-row-per-participant slice rather than these 594 visit rows. The workflow move: you
+*assembled* the analysis dataset with a join, *checked* the row count against the grain, and *named what the
+result does and does not show*.
+
+### Worked example — transfer: a grouped goal-met rate in a new context
+
+**The task.** Switch to a new context to show the same PROC SQL idioms transfer. Imagine a different synthetic
+table, `wp.library_visits`, from a campus learning-center program: one row per student-visit, with columns
+`student_id`, `branch` (char: "Main" / "East" / "West"), and `renewed` (num 1/0 — whether the student renewed
+their borrowing privileges that visit). We want, per branch, the number of visits and the **renewal rate** —
+and we only want branches with a meaningful number of visits, so we filter groups with `HAVING`. The data are
+**synthetic; seed `streaminit(20260824)`** and illustrative only (these are *not* locked study numbers).
+
+**The code.**
+
+```sas
+proc sql;
+  select branch,
+         count(*)        as n_visits,
+         mean(renewed)   as renewal_rate format=5.2   /* mean of 0/1 = a proportion */
+  from wp.library_visits
+  where branch is not missing
+  group by branch
+  having count(*) >= 50
+  order by renewal_rate desc;
+quit;
+```
+
+**The synthetic output and log.**
+
+```text
+Output (synthetic, not executed)
+
+  branch   n_visits   renewal_rate
+  ------   --------   ------------
+  East          120           0.58
+  Main          240           0.51
+  West           60           0.44
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.04 seconds
+NOTE: There were 3 rows selected.
+```
+
+**The verification check.** Three branches survive the `HAVING count(*) >= 50` filter; a fourth small branch
+(say a pop-up kiosk with 12 visits) would be excluded — so confirm that the surviving groups are the ones you
+meant to keep, and that the included visit counts sum to the total you expect from the source table. Because
+`renewed` is 0/1, its `MEAN` is the **renewal proportion**, which must lie in $[0, 1]$ — 0.58, 0.51, 0.44 all
+do. A value of 1.7 would mean `renewed` was not actually 0/1 (a type or coding problem) and you would stop.
+
+**The interpretation.** East branch shows the highest synthetic renewal rate (0.58) and West the lowest
+(0.44). Same SQL machinery as the wellness example — `GROUP BY`, a summary function, a group filter — applied
+to a wholly different table, which is the point: PROC SQL is a general query tool, not a study-specific trick.
+And the same cautions hold: these are invented numbers, the comparison is observational (branch is not a
+randomized treatment), and a visible gap is not a tested or practically important one.
+
+## A common mistake
+
+The week's signature trap is the **unchecked row count after a join** — the cardinal sin of relational work —
+together with the two failures that *cause* a wrong count.
+
+- **Key-type mismatch.** If `participant_id` is **numeric** in one table and **character** in the other (a
+  classic week-5 import problem — a key read as `"10427"` text instead of the number `10427`), the join
+  condition `on p.participant_id = s.participant_id` either errors or, worse, matches nothing and returns **0
+  rows** or a silently wrong set. The log may show `NOTE: Character values have been converted to numeric` or a
+  type-mismatch note. **The fix:** check both keys' types with PROC CONTENTS first; convert one with
+  `input()`/`put()` so both are the same type before joining. Character versus numeric is load-bearing here.
+
+- **Unintended many-to-many (a Cartesian blow-up).** If the join key is *not* unique on the side you assumed —
+  say a duplicate `participant_id` slipped through cleaning, or you join on a non-key column — PROC SQL pairs
+  every matching left row with every matching right row, and the row count **explodes** far above what either
+  table's grain predicts. The log warns: `WARNING: A Cartesian product has been detected.` A join that should
+  give 594 returning 1,782 is this bug. **The fix:** confirm the key is unique where you expect it (a `select
+  participant_id, count(*) ... group by participant_id having count(*) > 1` finds duplicates), and re-run
+  cleaning if it is not.
+
+- **The unchecked count itself.** Even with clean keys, choosing the **wrong join type** silently changes the
+  result: an inner join when you needed a left join drops the 2 unscreened participants (594 instead of 596);
+  a left join when you needed inner carries 2 empty rows into your summaries. Neither errors. **The fix is the
+  habit:** *predict the count from the grains, then read the actual count off the log and compare.* Inner = 594,
+  left = 596 — if the number you got is neither and you cannot explain it, you have a bug, not a result.
+
+The deeper point: SAS will not tell you the join was *wrong*, only what it *did*. The row count is the
+single cheapest verification in the whole workflow, and skipping it is how a broken analysis dataset reaches
+the t-test looking perfectly healthy.
+
+## Low-stakes self-checks (ungraded)
+
+For self-study only — ungraded, nothing to submit.
+
+1. Write a PROC SQL query that returns the count of `participants` per `arm`. Without running it, predict the
+   two counts from the locked frequencies, then say what they must sum to.
+2. In one sentence each, state the difference between `WHERE` and `HAVING`, and between an inner join and a
+   left join. Which clause filters rows, and which filters groups?
+3. The inner join of the two study tables returns 594 rows and the left join returns 596. Explain the gap of 2
+   in terms of the table grains, and say which join you would use to answer "how many enrolled participants
+   were never screened?"
+4. A classmate's join that should return 594 rows returns 1,782 instead, and the log shows a Cartesian-product
+   warning. Name the most likely cause and the check you would run to confirm it.
+5. You join `participants` to `screenings` and get 0 rows even though both tables are populated. Which
+   load-bearing variable property would you check first, and with which procedure?
+6. The grouped summary shows coaching at 125.9 and usual_care at 130.8 mmHg. Write one sentence interpreting
+   the gap that correctly flags it as associational and observational rather than a causal health finding.
+
+## Reading and source pointer
+
+For this week's syntax, see the official **SAS documentation for PROC SQL** — specifically the **`SELECT`
+statement** (the `WHERE`, `GROUP BY`, and `HAVING` clauses for filtering and grouped summaries) and the
+**joins** material (inner join, left/right outer join, and the `ON` clause for the join condition), plus the
+documentation's notes on the **Cartesian product** and **join cardinality** that explain an exploded or
+short row count. Use these as a reading pointer in the course's own words: practise finding the authoritative
+syntax and the exact option names yourself, because "learning to check the documentation" is a course skill.
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The
+load-bearing numbers here — the **200** cleaned participants and the **66 / 70 / 64** site counts; the
+**594**-row inner join versus **596**-row left join and the **2** unmatched unscreened participants; the
+per-arm screening counts **297 / 297** and arm means **125.9 / 130.8**; and the illustrative (non-locked)
+transfer figures (120 / 240 / 60 visits and 0.58 / 0.51 / 0.44 renewal rates) — are drafted "as if run" for this draft site and cross-checked only for internal and narrative consistency against the locked
+wellness-program study (seed `streaminit(20260824)`). The course **SAS execution/output gate is BLOCKED**; a
+rendered code block or typed listing is not evidence the code runs or the numbers are right. Do not treat any
+value here as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we move from assembling the analysis dataset to **summarising it**: PROC MEANS, PROC FREQ, and PROC
+UNIVARIATE turn the joined data into report-ready tables — the mean and SD of `systolic_bp` (128.4 / 14.2 over
+594 rows), the categorical frequencies, and the distributional checks that confirm a variable is shaped the
+way you assumed. Week 7 also carries the **midterm practical (Friday, October 9, in class)**, which covers the
+workflow through this point: SAS environment, project setup, libraries, datasets, variable attributes, the
+DATA step, importing, cleaning, validation, PROC SQL, and summaries.
+
+## See also
+
+- Previous week: [Week 5 — importing, cleaning, and validating](week-05-importing-cleaning-validating.qmd) —
+  where the 210 raw rows became the 200 clean participants this week joins.
+- Next week: [Week 7 — summaries, tables, and the midterm](week-07-summaries-tables-and-midterm.qmd) — turning
+  the joined data into report-ready summaries.
+- Companion lab: [Lab 6 — PROC SQL joins and relationship checks](../labs/lab-06-proc-sql-joins-and-relationship-checks.qmd) —
+  the fuller hands-on join and row-count sequence.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, dataset, key, grain, character vs
+  numeric, and the log levels.
+- [PROC reference](../resources/proc-reference.qmd) — PROC SQL and PROC SORT placed beside the other course
+  procedures, with the verification check for each.
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE / WARNING / ERROR and
+  checking row counts before and after a join.

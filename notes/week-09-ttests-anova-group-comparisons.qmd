@@ -1,0 +1,464 @@
+---
+title: "Week 9 — t-tests, ANOVA, and group comparisons"
+subtitle: "Comparing groups in SAS, with assumptions and honest interpretation"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC TTEST — supports the two-group comparison of a continuous outcome"
+  - "SAS documentation — PROC GLM / PROC ANOVA — supports the one-way analysis of variance across 3+ groups"
+  - "SAS documentation — PROC SGPLOT (VBOX) — supports the by-group boxplot that pictures group spread"
+  - "Introduction to Modern Statistics (IMS), 2nd ed. — inference for comparing means — supports the statistical background for t-tests and ANOVA"
+toc: true
+---
+
+## The week question
+
+For eight weeks you have been building an analysis-ready table: opening SAS, organizing a project, reading
+data with the DATA step, importing and cleaning until 210 messy rows became 200 trustworthy participants,
+joining the `participants` and `screenings` tables with the row count checked, summarizing with PROC MEANS and
+PROC FREQ, and producing report-ready output with ODS. This week the workflow asks its first **comparative**
+question of that clean data: **do two (or more) groups differ on an outcome by more than sampling noise would
+explain?** Concretely — does mean `systolic_bp` differ between the coaching `arm` and the usual_care arm
+(two groups → a t-test), and does it differ across the three `site` groups North, Central, and South (three
+groups → one-way ANOVA)? The procedures are PROC TTEST and PROC GLM. The harder, more important half of the
+week is everything around the procedure: stating the assumptions before you trust the test, reading the right
+row of the output, checking the data the procedure ran on, and saying — honestly — what a significant result
+does and does not establish about a synthetic, observational study.
+
+## Why this matters
+
+Group comparison is the first place the course's statistics show up as a decision, and it is the first place
+the workflow's discipline really earns its keep. Three reasons it matters here. First, **a p-value is only as
+trustworthy as the table it was computed on**: if a join silently dropped rows, if a numeric outcome was
+stored as character, or if missing values quietly thinned a group, the test runs and prints a confident number
+that means nothing. The verification habits from weeks 4–7 — check the row count, confirm the type, count
+`NMISS` — are what make a t-test believable, so they come with us, not behind us. Second, **the procedure does
+not state its own assumptions**: PROC TTEST will happily compare two groups whether or not the data are
+approximately normal or the variances are equal, and PROC GLM will return an F whether or not the design
+supports it. Reading the output responsibly means knowing which assumption each row depends on and which row
+to read when an assumption fails. Third, this is where the most consequential interpretation traps live:
+**"statistically significant" is not "practically important," and an observational difference is not a causal
+effect.** In the synthetic wellness-program study the arms are *not* described as randomized, so the
+coaching-versus-usual_care difference is an **association**, not proof that coaching lowers blood pressure.
+Keeping that line straight is the professional core of the week.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Choose the right comparison for the question: **PROC TTEST** for two groups, **PROC GLM / PROC ANOVA** for
+  three or more groups on one continuous outcome.
+- Write idiomatic SAS for both — `PROC TTEST ... CLASS arm; VAR systolic_bp;` and `PROC GLM; CLASS site; MODEL
+  systolic_bp = site;` — and say what the **log** should report (observations read, no unexpected WARNING or
+  ERROR) before reading any result.
+- State the assumptions each test conditions on — independence, approximate normality, and equal variance —
+  and read the **right** output row accordingly (the pooled vs. Satterthwaite row in TTEST; the overall F in
+  GLM, and why it does not by itself say *which* groups differ).
+- Run a **verification check** before interpreting: confirm the analysis ran on the intended slice (the n=198
+  baseline rows), the outcome is numeric, and `NMISS` is what you expect.
+- Report the locked synthetic results in plain language — coaching 125.9 vs usual_care 130.8, difference −4.9
+  (95% CI −7.2, −2.6), $t = -4.27$, df 196, $p < .0001$; site F$(2,195) = 5.10$, $p = 0.0071$ — and interpret
+  them as **associational**, not causal.
+- Keep "significant ≠ important" and "observational ≠ causal" explicit, and flag every number on the page as
+  synthetic (`streaminit(20260824)`) and unverified.
+
+## Core vocabulary
+
+Plain definitions of the week's SAS-and-statistics terms. The little math uses $...$ symbols; everything else
+is workflow language.
+
+- **PROC TTEST** — the SAS procedure that compares the mean of a continuous **VAR** across the two levels of a
+  **CLASS** variable (or against a fixed value, or for paired data). It returns each group mean, the
+  difference, a confidence interval, and the $t$ statistic with its p-value.
+- **PROC GLM / PROC ANOVA** — the procedures for the general linear model; for a single categorical predictor
+  this is **one-way analysis of variance (ANOVA)**. `MODEL outcome = group;` produces an overall **F test** of
+  whether the group means differ. (PROC GLM also handles unbalanced data and covariates; PROC ANOVA assumes a
+  balanced design.)
+- **CLASS variable** — the categorical grouping variable (here `arm` with 2 levels, or `site` with 3). SAS
+  treats CLASS variables as factors, not numbers.
+- **The $t$ statistic** — the difference in group means divided by its standard error,
+  $t = (\bar x_1 - \bar x_2) / \operatorname{SE}_{\text{diff}}$. Large $|t|$ (small p-value) means the observed
+  difference is large relative to sampling noise.
+- **The F statistic** — in one-way ANOVA, $F = (\text{variation between groups}) / (\text{variation within
+  groups})$, with **numerator and denominator degrees of freedom** (here $2$ and $195$). A large F means group
+  means are spread apart relative to within-group scatter.
+- **Pooled vs. Satterthwaite** — PROC TTEST prints two rows. The **pooled** row assumes equal group variances;
+  the **Satterthwaite** row does not. The **Equality of Variances** (folded F) line tells you which row to
+  trust.
+- **Degrees of freedom (df)** — the bookkeeping that sizes the reference distribution; df $= 196$ for the
+  two-arm t-test (≈ $n - 2$), and $(2, 195)$ for the three-site F.
+- **p-value** — the probability, **if the group means were truly equal**, of a difference at least this large
+  by chance. Small p casts doubt on "no difference"; it is **not** the probability the groups are equal, and
+  **not** a measure of effect size.
+- **Association vs. cause** — a group difference computed from observational data (arms not randomized) is an
+  **association**. Causal language ("coaching lowers BP") is not licensed by these data.
+
+## Concept development
+
+### Two groups: PROC TTEST, and which row to read
+
+The two-group comparison is the natural first statistical procedure because the question is concrete: is the
+mean outcome the same in both groups? PROC TTEST answers it. You name the two-level grouping variable on
+`CLASS` and the continuous outcome on `VAR`:
+
+```sas
+/* Compare mean systolic_bp between the two study arms.            */
+/* base.baseline_v1 = one row per participant, visit 1 (n = 198).  */
+proc ttest data=base.baseline_v1;
+    class arm;
+    var systolic_bp;
+run;
+```
+
+PROC TTEST prints several pieces. The first is a small table of **group means** with their confidence
+intervals; the second is the **difference** in means with its CI; the third gives the $t$ statistic, df, and
+p-value on **two** rows — *Pooled* and *Satterthwaite*; and a fourth small table, **Equality of Variances**,
+reports a folded-F test that helps you choose between those two rows.
+
+```text
+Output (synthetic, not executed) — PROC TTEST systolic_bp by arm
+
+                         N      Mean     Std Dev    Std Err
+arm = coaching          99    125.9      11.8        1.19
+arm = usual_care        99    130.8      12.3        1.24
+Diff (1-2)                     -4.9                   1.15
+
+Method           Variances      DF    t Value    Pr > |t|
+Pooled           Equal          196     -4.27      <.0001
+Satterthwaite    Unequal        195.6   -4.27      <.0001
+
+Equality of Variances:  Folded F  Num DF 98  Den DF 98  F 1.09  Pr > F  0.66
+```
+
+**What the log should say.** `NOTE: The data set BASE.BASELINE_V1 has 198 observations` upstream, and the
+TTEST step should add no WARNING or ERROR — in particular **no** "Invalid data" note (which would mean the
+outcome was read as character). **Verification check before interpreting:** confirm the procedure ran on the
+intended slice and that each arm has the expected count — the output shows N = 99 per arm, which sums to 198,
+matching the baseline slice; if a group showed far fewer rows you would suspect a filter or a type problem,
+not a real finding. **Interpreting:** the Equality-of-Variances line gives $F = 1.09$, $p = 0.66$, so there is
+no evidence the variances differ — read the **Pooled** row. Coaching averages 125.9 and usual_care 130.8, a
+difference of −4.9 mmHg with $t = -4.27$ on 196 df and $p < .0001$. The workflow move: you read the clean
+baseline table, ran one PROC, checked the per-group counts against the known slice, picked the correct row by
+its variance test, and only *then* read the difference.
+
+### Three or more groups: PROC GLM and the one-way ANOVA F
+
+When the grouping variable has more than two levels — `site` has three — a t-test no longer fits, because
+comparing every pair separately inflates the chance of a false "difference." One-way ANOVA asks a single
+omnibus question: **are the group means all equal, or does at least one differ?** PROC GLM fits it. By-group
+analysis here does **not** require a prior `PROC SORT` (GLM handles the CLASS variable internally), but the
+outcome must be numeric and the CLASS variable categorical:
+
+```sas
+/* One-way ANOVA: does mean systolic_bp differ across the 3 sites? */
+proc glm data=base.baseline_v1;
+    class site;
+    model systolic_bp = site;
+    means site;            /* group means to report alongside the F */
+run;
+quit;
+```
+
+```text
+Output (synthetic, not executed) — PROC GLM systolic_bp = site
+
+Source            DF    Sum of Squares    Mean Square    F Value    Pr > F
+Model              2          1789.4          894.7        5.10      0.0071
+Error            195         34206.8          175.4
+Corrected Total  197         35996.2
+
+R-Square  0.0497     Root MSE  13.24
+
+Level of site     N      Mean systolic_bp
+North            70        126.1
+Central          66        128.9
+South            64        130.6
+```
+
+**What the log should say.** Observations read = 198; `NOTE` lines for the model fit; no `ERROR: Variable site
+... not found` and no `ERROR: Data set is not sorted` (GLM does not need a sort, but a stray `BY site;`
+without one would trigger that). **Verification check:** the three group N's are 70 / 66 / 64 — exactly the
+locked cleaned `site` frequencies — and they sum to 200, while the model used 198 (the two unscreened
+participants have no baseline `systolic_bp` and drop out); confirming those counts is how you know the F was
+computed on the right rows. **Interpreting:** $F(2,195) = 5.10$ with $p = 0.0071$, so the three site means are
+**not** all equal — they step upward from North 126.1 to Central 128.9 to South 130.6. Crucially, the omnibus
+F says *that* a difference exists, **not which** pair differs; identifying specific pairs needs a follow-up
+multiple-comparison step (e.g. Tukey), which is a deliberate next move, not something to read off the F.
+
+### Assumptions come before the p-value, not after
+
+Both procedures rest on three assumptions, and the workflow states them **first**:
+
+- **Independence** — observations do not influence one another. Here we run on the **visit-1 baseline slice**
+  (one row per participant) precisely so the rows are independent; running a t-test on all 594 screening rows
+  would treat three visits from one person as three independent observations, which they are not. Choosing the
+  slice *is* honoring the assumption.
+- **Approximate normality** of the outcome within each group — the $t$ and $F$ reference distributions assume
+  it. With ~99 and ~65 per group the procedures are fairly robust, but you check with PROC UNIVARIATE or a
+  histogram (week 8) rather than assuming.
+- **Equal variance** across groups — the pooled t-test and the ANOVA F assume it. PROC TTEST tests it directly
+  (the folded-F line, $p = 0.66$ here → equal is fine); for GLM you inspect the by-group spread, which is
+  exactly why the week's recommended **boxplot of `systolic_bp` by `site`** is worth drawing.
+
+```sas
+/* Picture the group spread BEFORE reading the F: boxplots by site. */
+proc sgplot data=base.baseline_v1;
+    vbox systolic_bp / category=site;
+    title "systolic_bp by site (synthetic; seed 20260824)";
+run;
+```
+
+In a SAS session this emits three side-by-side boxplots; **in these notes nothing is run**, so picture the
+result from the locked numbers: three boxes that **overlap substantially**, with medians stepping upward near
+126, 129, and 131 and similar box heights (comparable spread, consistent with the equal-variance assumption).
+**Interpreting the picture honestly:** overlapping boxes do **not** mean "no difference," and well-separated
+boxes would not by themselves mean "significant" — the boxplot sets up the assumption check and the intuition,
+and the F$(2,195)=5.10$, $p=0.0071$ test supplies the inference. State the load-bearing numbers in prose, as
+here; never make a reader squint them off a figure that this draft site does not even render.
+
+### Significance is not importance, and association is not cause
+
+A small p-value answers one narrow question — is the difference larger than sampling noise? — and **nothing
+else**. Two disciplines follow. First, **significance ≠ practical importance**: the arm difference of −4.9 mmHg
+is statistically clear ($p < .0001$), but whether 4.9 mmHg matters is a clinical judgment about effect size,
+not a verdict the p-value delivers; always report the **difference and its CI** (−4.9; −7.2 to −2.6)
+alongside the p, so size and uncertainty travel together. Second, and non-negotiable for this study,
+**observational ≠ causal**: the synthetic arms are **not described as randomized**, so participants may differ
+between coaching and usual_care in ways that also affect blood pressure (age, baseline BMI, site). The correct
+reading is "mean baseline `systolic_bp` is **associated** with arm," never "coaching **lowers** blood
+pressure." The same caution carries to ANOVA: sites *differ*, but why they differ (composition, region,
+recruitment) is unidentified here.
+
+## Worked examples
+
+### Worked example — the wellness-program study: BP by arm (t-test) and by site (ANOVA)
+
+**The task.** On the synthetic RiverCity wellness-program study (synthetic; seed `streaminit(20260824)`;
+observational, not real health data), compare mean `systolic_bp` between the two arms, then across the three
+sites, using the visit-1 baseline slice (one row per participant). Report each result and interpret it
+honestly.
+
+**The code.** First build the baseline slice from the joined study data, then run both comparisons:
+
+```sas
+/* Baseline slice: visit 1 only, one row per participant. */
+data base.baseline_v1;
+    set base.screenings_joined;     /* participants x screenings, inner join */
+    where visit_num = 1;
+run;
+
+proc ttest data=base.baseline_v1;   /* two groups: arm */
+    class arm;
+    var systolic_bp;
+run;
+
+proc glm data=base.baseline_v1;     /* three groups: site */
+    class site;
+    model systolic_bp = site;
+    means site;
+run;
+quit;
+```
+
+**The synthetic log.**
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 594 observations read from the data set BASE.SCREENINGS_JOINED.
+NOTE: The data set BASE.BASELINE_V1 has 198 observations and 9 variables.
+NOTE: PROCEDURE TTEST used (Total process time): real time 0.04 seconds.
+NOTE: PROCEDURE GLM used (Total process time): real time 0.06 seconds.
+```
+
+**The synthetic output.**
+
+```text
+Output (synthetic, not executed)
+
+-- PROC TTEST: systolic_bp by arm --
+arm = coaching     N 99    Mean 125.9    Std Err 1.19
+arm = usual_care   N 99    Mean 130.8    Std Err 1.24
+Diff (1-2)               -4.9     95% CL  (-7.2, -2.6)
+Pooled         DF 196    t -4.27   Pr>|t| <.0001
+Equality of Variances: Folded F  F 1.09  Pr>F 0.66  -> read Pooled
+
+-- PROC GLM: systolic_bp = site --
+Source   DF   F Value   Pr>F
+Model     2     5.10    0.0071
+Level of site:  North N70 Mean 126.1 | Central N66 Mean 128.9 | South N64 Mean 130.6
+```
+
+**The verification check.** Read the log first: 594 rows entered the slice step and **198** survived `where
+visit_num = 1`, which matches the locked baseline n (198 of 200 participants have screenings). The TTEST
+counts are 99 + 99 = 198; the GLM site counts are 70 + 66 + 64 = 200 enrolled, of which 198 had a baseline BP
+and entered the model. No WARNING/ERROR, and **no** "Invalid data" or "character values converted to numeric"
+note — so `systolic_bp` was numeric, as required. The counts are exactly the locked study frequencies, which
+is the green light to interpret.
+
+**The interpretation.** Coaching averages **125.9** and usual_care **130.8**, a difference of **−4.9** mmHg
+(95% CI **−7.2 to −2.6**); the variances are comparable ($F = 1.09$, $p = 0.66$), so the pooled $t = -4.27$ on
+**196** df with $p < .0001$ is the right row: the arm difference is far larger than sampling noise. Across
+sites, mean BP steps from North **126.1** to Central **128.9** to South **130.6**, and the one-way ANOVA
+gives $F(2,195) = 5.10$, $p = 0.0071$ — the site means are not all equal. **What this does and does not show:**
+it shows mean baseline `systolic_bp` is **associated** with both arm and site in this synthetic cohort. It does
+**not** show coaching *causes* lower BP — the arms are not randomized, so the difference is observational — and
+the ANOVA F does **not** tell us *which* sites differ (a Tukey follow-up would). Significant here means
+"distinguishable from noise," not "large enough to matter clinically"; that is why the difference and its CI
+are reported alongside the p-value.
+
+### Worked example — transfer: comparing daily steps between arms (a new outcome)
+
+**The task.** A new analytic question on a **different outcome**: do the two arms differ in average daily
+activity, measured as `steps_k` (thousands of steps/day)? This transfers the two-group t-test to a new
+continuous variable in the same study — and, importantly, exercises the verification habit on a variable that
+has **missing values**, so the per-group counts will not be a clean 99/99. (Figures are illustrative transfer
+values, not locked study results; the only locked `steps_k` fact is its overall mean of 7.45.)
+
+**The code.** Always count missing before comparing means:
+
+```sas
+/* First: how much steps_k is missing, by arm? */
+proc means data=base.baseline_v1 n nmiss mean;
+    class arm;
+    var steps_k;
+run;
+
+/* Then the two-group comparison on the available data. */
+proc ttest data=base.baseline_v1;
+    class arm;
+    var steps_k;
+run;
+```
+
+**The synthetic log and output.**
+
+```text
+SAS log (synthetic)
+NOTE: The data set BASE.BASELINE_V1 has 198 observations and 9 variables.
+NOTE: PROCEDURE MEANS used ... PROCEDURE TTEST used ... (no WARNING/ERROR).
+
+Output (synthetic, not executed) -- transfer; illustrative values, not locked
+-- PROC MEANS steps_k by arm --
+arm = coaching     N 96   NMISS 3   Mean 7.7
+arm = usual_care   N 95   NMISS 4   Mean 7.2
+
+-- PROC TTEST steps_k by arm --
+Diff (1-2)   0.5    95% CL (0.05, 0.95)
+Pooled   DF 189   t 2.18   Pr>|t| 0.030
+Equality of Variances: Folded F  Pr>F 0.41  -> read Pooled
+```
+
+**The verification check.** This is the point of the example: PROC MEANS reports `NMISS` of 3 and 4, so 7
+participants are missing `steps_k`. The t-test therefore runs on $96 + 95 = 191$ rows, **not** 198 — and the
+df is 189 ($\approx 191 - 2$), not 196. If you skipped the `NMISS` count you might wrongly report "n = 198";
+the count is what keeps the reported sample size honest. Confirm too that `steps_k` is numeric (no conversion
+note) and the difference's CI excludes zero consistently with the p-value.
+
+**The interpretation.** On the available data, coaching averages ~7.7k steps and usual_care ~7.2k, a
+difference of ~0.5k steps (95% CI roughly 0.05 to 0.95; $t = 2.18$, $p = 0.030$). The same workflow as the BP
+comparison applies, with two transfer lessons: the comparison was run on **191** rows after 7 missing values
+dropped out (count them, don't assume the full n), and the result is again **associational** — steps differ by
+arm in this synthetic cohort, but with the arms not randomized this is not evidence that coaching *produces*
+more walking. Report the difference and CI next to the p so size and uncertainty travel together.
+
+## A common mistake
+
+The week's signature trap is **letting the procedure run on a table you didn't verify, then over-claiming the
+result.** It shows up in four related ways, each defused by a habit you already have:
+
+- **Wrong grain.** Running the t-test on all **594** screening rows instead of the **198**-row baseline slice
+  treats three visits per person as independent — it violates independence and inflates the apparent sample
+  size. *Fix:* subset to one row per participant (`where visit_num = 1`) and confirm the log says 198.
+- **Silent type problem.** If `systolic_bp` arrived as **character**, PROC TTEST/GLM either errors or the log
+  warns "character values have been converted to numeric"; an unverified run can produce a nonsense or empty
+  result. *Fix:* read the log for that note and confirm the type with PROC CONTENTS before trusting the test.
+- **Unchecked missing/counts.** Skipping `NMISS` (as the steps example shows) makes you misreport the sample
+  size and the df. *Fix:* run PROC MEANS with `N NMISS` by group first; the per-group counts must match what
+  you expect.
+- **Over-claiming.** Reading $p < .0001$ as "coaching lowers blood pressure" conflates **significance with
+  importance** and **association with cause**. The arms are not randomized and the data are synthetic and
+  observational. *Fix:* report the difference and CI for size, and state the relationship is associational —
+  "mean BP is associated with arm," never "coaching lowers BP."
+
+The unifying rule is the course's recurring test: *would someone else be able to understand, rerun, and verify
+this?* A p-value computed on an unverified table answers a question you cannot defend.
+
+## Low-stakes self-checks (ungraded)
+
+For self-study only — ungraded, nothing to submit.
+
+1. Write the PROC TTEST call comparing `systolic_bp` across `arm`. Which two output rows does TTEST print, and
+   which line tells you which one to read? For the locked output ($F = 1.09$, $p = 0.66$), which row is correct
+   and why?
+2. You run the arm t-test and the log says the data set has **594** observations. What went wrong, and what
+   should the count be? Write the one statement that fixes it.
+3. State the three assumptions behind the pooled t-test and the one-way F. For each, name one thing you would
+   check in SAS (a slice, a PROC, or a plot) before trusting the result.
+4. The site ANOVA gives $F(2,195) = 5.10$, $p = 0.0071$. In one sentence, what does this establish — and what
+   does it **not** establish about which specific sites differ?
+5. A classmate writes: "The t-test was significant ($p < .0001$), so coaching lowers blood pressure by 4.9
+   mmHg." Identify the two distinct overclaims using this week's vocabulary (hint: importance, and cause).
+6. In the steps transfer, PROC MEANS shows `NMISS` 3 and 4. Why is the t-test df **189** and not 196, and what
+   would you have misreported if you skipped the `NMISS` check?
+
+## Reading and source pointer
+
+For the SAS syntax, see the SAS documentation for **PROC TTEST** (the `CLASS`/`VAR` two-group comparison, the
+pooled vs. Satterthwaite rows, and the equality-of-variances test) and for **PROC GLM / PROC ANOVA** (the
+`CLASS`/`MODEL` one-way analysis of variance and the overall F test), plus **PROC SGPLOT** (the `VBOX`
+statement for by-group boxplots). Use these as a *reading pointer* — find the relevant page, read the option
+in SAS's own words, and bring back the idea, not the prose. For the **statistical background** — what a t-test
+and one-way ANOVA test, why the assumptions matter, and how to interpret a difference and a p-value
+responsibly — consult **Introduction to Modern Statistics (IMS), 2nd ed. (Çetinkaya-Rundel & Hardin), CC
+BY-SA 3.0**, the chapters on **inference for comparing means** (the two-group difference and analysis of
+variance). These notes are the course's own synthesis: grounded in the SAS documentation and open statistics
+references, but not copied from them. SAS® and all SAS Institute product names are the property of SAS
+Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and **every numeric value on this page** are
+hand-authored, synthetic, and **were NOT run** — SAS is proprietary and is not executed in this build. The
+course **SAS execution/output gate is BLOCKED**; a rendered, syntax-highlighted code block or a typed listing
+is **not** evidence the code runs or that the numbers are right. The load-bearing values here — the arm t-test
+(coaching **125.9** vs usual_care **130.8**; difference **−4.9**, 95% CI **−7.2 to −2.6**; pooled $t = -4.27$,
+df **196**, $p < .0001$; folded $F = 1.09$, $p = 0.66$); the site ANOVA (means **126.1 / 128.9 / 130.6**;
+$F(2,195) = 5.10$, $p = 0.0071$); the baseline slice n = **198**; the locked site counts **70 / 66 / 64**; and
+the **illustrative** (not locked) `steps_k` transfer figures — are drafted "as if run" for this draft site
+and cross-checked only for internal and narrative consistency. All data are **synthetic** (`call
+streaminit(20260824)`) for the **wellness-program study**, which is **observational** and **not real health
+data**; the arm and site differences are **associational, not causal**. Do not treat any value here as a
+confirmed reference until the human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we move from *comparing* group means to *modeling* the outcome continuously: **Week 10 — linear
+regression** fits `systolic_bp = age baseline_bmi` with PROC REG (intercept 86.5, slopes 0.45 and 1.02,
+R² = 0.214, RMSE = 12.6), and asks how much of the variation in blood pressure the predictors explain — with
+residual diagnostics, prediction, and the same "significant ≠ important, observational ≠ causal" discipline
+carried forward. It comes with a companion hands-on lab.
+
+## See also
+
+- Previous week: [Week 8 — Visualization and ODS output](week-08-visualization-and-ods-output.qmd) — the
+  SGPLOT histogram and ODS output that set up this week's by-site boxplot.
+- Next week: [Week 10 — Linear regression](week-10-linear-regression.qmd) — modeling `systolic_bp` from `age`
+  and `baseline_bmi`, with a companion lab.
+- [Week 11 — Logistic regression and categorical outcomes](week-11-logistic-regression-categorical.qmd) —
+  comparing groups on the **binary** `goal_met` outcome (the arm odds ratio 1.78).
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — CLASS, VAR, MODEL; pooled vs.
+  Satterthwaite; the F and t statistics.
+- [Procedure reference](../resources/proc-reference.qmd) — PROC TTEST, GLM, REG, and LOGISTIC side by side.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR and
+  checking counts, types, and NMISS before you trust a result.

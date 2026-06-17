@@ -1,0 +1,459 @@
+---
+title: "Week 5 — Importing, cleaning, and validating data"
+subtitle: "From a raw file to a trustworthy analysis-ready dataset"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC IMPORT — supports reading an external file (CSV/Excel) into a SAS dataset"
+  - "SAS documentation — PROC CONTENTS — supports inspecting variable names, types, and lengths after import"
+  - "SAS documentation — PROC FREQ — supports validating categorical keys and frequency expectations"
+  - "SAS documentation — the MMDDYY informat — supports reading a character date into a real SAS date value"
+toc: true
+---
+
+## The week question
+
+Last week you wrote DATA-step logic to create, subset, and clean a dataset that already lived inside SAS. But
+real analytics almost never starts inside SAS — it starts as a file someone emailed you: a CSV export, an
+Excel workbook, a tab-delimited dump from a database. This week's question is the one that separates a casual
+script from a professional analytics workflow: **how do you bring an external file into SAS and then prove the
+imported data is what you think it is before you analyze it?** The verb that matters here is *prove*. Importing
+is the easy half — one PROC IMPORT step reads the file. The hard, load-bearing half is **validation**: checking
+the row count against what you expected, confirming each variable came in with the right *type*, finding the
+typos and impossible values and missing entries, and reading the log for the quiet notes that warn you
+something went wrong. We will take the raw wellness-program file from 210 rows on disk to 200 trustworthy,
+analysis-ready participant rows, and at every step we will say what the log should confirm and what we checked.
+
+## Why this matters
+
+An analysis is only as trustworthy as the data underneath it, and import is exactly where the data is most
+fragile. A column of numbers that silently arrives as character will block PROC MEANS later. A date read as the
+text `"08/24/2026"` instead of a SAS date will sort wrong and break every date comparison. A duplicated key
+will double-count people in a join. A typo of `199` in an age column will quietly inflate a mean. None of these
+throws a red ERROR — the program runs, output appears, and the result is wrong. That is the danger: **import
+failures are usually silent.** The course's recurring test applies with full force here — *would someone else
+be able to understand, rerun, and verify this?* — because an unvalidated import is a result resting entirely on
+trust. This week builds the habit that protects every later week: import, then immediately *interrogate* what
+you imported with PROC CONTENTS, PROC FREQ, and a deliberate row-count check, and only then call the data
+clean. The cleaned object you produce here — exactly **200 unique participants** — is the foundation the join
+week, the summary week, and every statistical-procedure week stand on.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Import an external file (CSV or Excel) into a SAS dataset with PROC IMPORT, and state what its log NOTE about
+  observations and variables should say.
+- Read a SAS import log line by line — `NOTE` (counts), `WARNING` (something may be wrong), `ERROR` (the step
+  failed) — and find the quiet signs of a bad informat or a silent type conversion.
+- Run a deliberate **post-import validation pass**: check the row count against your expectation, confirm each
+  variable's *type* with PROC CONTENTS, and check categorical keys and missingness with PROC FREQ and `NMISS`.
+- Diagnose and fix the locked data-quality issues in the raw wellness file — 8 duplicate `participant_id`
+  rows, 2 internal test rows, an `age` typo of `199`, 12 blank `sex` values, a character `enroll_date` needing
+  the `MMDDYY10.` informat, and 2 impossible `baseline_bmi = 0` values — to land on 200 clean rows.
+- Transfer the same import-then-validate discipline to a second, differently-shaped file and catch a wrong
+  variable type before it reaches an analysis.
+- Write a short verification note for an import — expected vs actual counts, types confirmed, missingness
+  checked — so another analyst could rerun it and reach the same cleaned dataset.
+
+## Core vocabulary
+
+The week's working vocabulary. These mirror the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd); keep *importing*, *type*, *informat*, and
+*validation* distinct in both words and habit.
+
+- **Import** — reading an external file (CSV, Excel, delimited text) into a native SAS dataset. PROC IMPORT
+  *guesses* types and lengths from the data; that guess is the first thing you must verify.
+- **Type** (character vs numeric) — the most load-bearing attribute of a SAS variable. A number that arrives as
+  *character* cannot be averaged; `participant_id` and `goal_met` must be numeric, `sex`/`site`/`arm` are
+  character. Naming the type is a validation step, not a formality.
+- **Informat** — the instruction that tells SAS *how to read* incoming text into a value. `MMDDYY10.` reads
+  `"08/24/2026"` as the SAS date it represents; without it the date stays a meaningless character string. An
+  informat reads input; a **format** controls display — do not confuse them.
+- **SAS date** — a numeric value (days since 01JAN1960) shown through a date format. A date that is still
+  character is not yet a date you can sort, subtract, or compare.
+- **Validation** — the deliberate act of checking imported data against expectations *before* trusting it: row
+  count, variable types, key uniqueness, value ranges, and missingness.
+- **`NMISS`** — the count of missing values for a variable (numeric missing is `.`, character missing is blank
+  `" "`). PROC MEANS reports it; checking `NMISS` is how you catch the 12 blank `sex` values and the coerced
+  `age` typo.
+- **Duplicate key** — more than one row sharing a value that should be unique (here `participant_id`).
+  Duplicates inflate counts and corrupt joins; PROC FREQ or PROC SORT NODUPKEY surfaces and removes them.
+- **Verification note** — the short written record, attached to an import, of expected vs actual counts, types
+  confirmed, and checks performed. A result you cannot rerun and verify is a result on trust alone.
+
+## Concept development
+
+### Importing an external file with PROC IMPORT
+
+The entry point to the workflow is PROC IMPORT, which reads a delimited file or an Excel sheet and writes a SAS
+dataset. The minimum you supply is the source path, the output dataset, and the file type; `GETNAMES=YES` tells
+SAS the first row holds column names, and `GUESSINGROWS` controls how many rows SAS scans before deciding each
+column's type. Always send the output to a named dataset you can inspect — never analyze the file in place.
+
+```sas
+options validvarname=v7;
+libname well "/home/u_well/wellness";   /* permanent library for the study */
+
+proc import
+    datafile="/home/u_well/wellness/participants_raw.csv"
+    out=work.participants_raw
+    dbms=csv
+    replace;
+    getnames=yes;
+    guessingrows=max;     /* scan ALL rows before deciding each column's type */
+run;
+```
+
+The log is the primary output of this step, and the line you read first is the observation count.
+
+```text
+SAS log (synthetic)
+NOTE: The infile '/home/u_well/wellness/participants_raw.csv' is:
+      Filename=/home/u_well/wellness/participants_raw.csv,
+      ... (file attributes) ...
+NOTE: 210 records were read from the infile.
+NOTE: The data set WORK.PARTICIPANTS_RAW has 210 observations and 8 variables.
+NOTE: PROCEDURE IMPORT used (Total process time): real time 0.18 seconds
+```
+
+**Workflow move — what was read, what was created, what to check.** PROC IMPORT *read* the raw file and
+*created* `work.participants_raw`. The log NOTE confirms **210 observations and 8 variables** — and 210 is
+exactly the raw row count we expected, so the first check passes. But "210 rows arrived" is not "the data is
+clean." Notice what the log does *not* say: it does not promise the types are right or that 210 is the number
+of *unique* participants. That is the next step's job. The discipline is to read the count NOTE on *every*
+import and compare it to a number you wrote down beforehand.
+
+### Validating what you imported — types, counts, and missingness
+
+PROC IMPORT *guessed* the type of every column. The validation pass confirms or refutes those guesses. Start
+with PROC CONTENTS, which lists each variable's name, type, length, and any format — the structural truth of
+the dataset.
+
+```sas
+proc contents data=work.participants_raw varnum;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+                          Variables in Creation Order
+
+ #   Variable         Type     Len   Format        Informat
+ 1   participant_id   Num        8
+ 2   age              Num        8
+ 3   sex              Char       1
+ 4   site             Char       8
+ 5   arm              Char      10
+ 6   enroll_date      Char      10                              <-- imported as CHARACTER
+ 7   baseline_bmi     Num        8
+ 8   region           Char      10
+```
+
+**Workflow move — confirm the type of every variable that matters.** Read the `Type` column against your
+expectation. `participant_id`, `age`, and `baseline_bmi` are numeric — good, those need arithmetic later.
+`sex`, `site`, `arm`, `region` are character — correct, they are labels. But `enroll_date` came in as
+**Char 10**: PROC IMPORT saw text like `"08/24/2026"` and read it as a string, not a date. That is locked
+issue #6, the bad informat, caught *before* it could break a sort. The fix is a DATA step that re-reads the
+text through the `MMDDYY10.` informat:
+
+```sas
+data work.participants_typed;
+    set work.participants_raw(rename=(enroll_date=enroll_date_c));
+    enroll_date = input(enroll_date_c, mmddyy10.);   /* char -> real SAS date */
+    format enroll_date date9.;                        /* display, e.g. 24AUG2026 */
+    drop enroll_date_c;
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 210 observations read from the data set WORK.PARTICIPANTS_RAW.
+NOTE: The data set WORK.PARTICIPANTS_TYPED has 210 observations and 8 variables.
+```
+
+The log shows no `Invalid data for enroll_date` note, so every text date parsed cleanly under `MMDDYY10.` —
+that *absence* is itself a check. If even one row had held a malformed date, SAS would have printed
+`NOTE: Invalid data for enroll_date in line ...` and set that value to missing, and you would chase it down.
+Interpreting: `enroll_date` is now a numeric SAS date displayed as `24AUG2026`; it can be sorted, subtracted,
+and compared, which the character version never could.
+
+### Checking keys and missingness before you trust the data
+
+Type is one half of validation; *content* is the other. Two questions remain: is the key `participant_id`
+actually unique, and how much is missing? PROC FREQ on the key surfaces duplicates, and PROC MEANS with
+`N` and `NMISS` quantifies missingness.
+
+```sas
+/* How many rows share each participant_id?  Any count > 1 is a duplicate. */
+proc freq data=work.participants_typed noprint;
+    tables participant_id / out=work.id_counts;
+run;
+
+proc freq data=work.id_counts;
+    tables count;          /* distribution of per-id row counts */
+run;
+
+/* Missingness and impossible values across the numeric columns */
+proc means data=work.participants_typed n nmiss min max;
+    var age baseline_bmi;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+  -- per-id row counts (PROC FREQ on COUNT) --
+  Count   Frequency
+      1         192      <-- 192 ids appear once
+      2           8      <-- 8 ids appear twice  => 8 duplicate rows + 2 test rows to remove
+
+  -- PROC MEANS  (N, NMISS, MIN, MAX) --
+  Variable          N    NMISS     Minimum     Maximum
+  age             209        1         22.0       199.0   <-- 199 is the impossible-age typo
+  baseline_bmi    210        0          0.0        41.8   <-- 0.0 is impossible (issue #5)
+```
+
+**Workflow move — read each number against an expectation.** The per-id distribution shows **8 ids appear
+twice**: those are the 8 duplicate `participant_id` rows (locked issue #1). PROC MEANS shows `age` has a
+maximum of `199.0` — no one is 199, so that is the locked typo (issue #2) to coerce to missing — and
+`baseline_bmi` has a minimum of `0.0`, the 2 impossible zeros (issue #5) to flag. Separately, a PROC FREQ on
+`sex` would show 12 rows with a blank level, the 12 missing `sex` values (issue #4). None of these threw an
+ERROR; the import "succeeded" with all of them present. They surface only because we *looked*. That looking —
+key uniqueness, ranges, `NMISS` — is the validation pass, and it is the difference between a clean dataset and
+a dataset that merely loaded.
+
+## Worked examples
+
+### Worked example — the wellness-program study: 210 raw rows → 200 clean participants
+
+**The task.** Import the raw `participants` file for the synthetic RiverCity wellness-program study and produce
+the analysis-ready dataset. The data are **synthetic; seed set, `streaminit(20260824)`**, and the program is an
+observational wellness-screening program — not real health data. You expect 210 rows on disk and, after
+cleaning, exactly **200 unique participants**, because the raw file carries 8 duplicate-`participant_id` rows
+and 2 internal test rows that must be removed, plus four value-level issues to repair (the `age=199` typo, 12
+blank `sex` values, the character `enroll_date`, and 2 impossible `baseline_bmi=0` values).
+
+**The code.** After importing and typing the date (above), one cleaning DATA step plus a NODUPKEY sort does the
+rest. The order matters: fix and flag values first, drop the test rows, then de-duplicate the key.
+
+```sas
+data work.participants_clean;
+    set work.participants_typed;
+
+    /* issue #2: age typo 199 -> missing, with a flag for the audit trail */
+    if age = 199 then do; age = .; age_flag = 1; end;
+
+    /* issue #5: impossible BMI of 0 -> missing, flagged */
+    if baseline_bmi = 0 then do; baseline_bmi = .; bmi_flag = 1; end;
+
+    /* issue #4: blank sex stays missing but is now visible */
+    if sex = " " then sex_flag = 1;
+
+    /* drop the 2 internal test rows (region marked "TEST") */
+    if region = "TEST" then delete;
+run;
+
+/* issue #1: remove the 8 duplicate participant_id rows */
+proc sort data=work.participants_clean out=work.participants nodupkey;
+    by participant_id;
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 210 observations read from the data set WORK.PARTICIPANTS_TYPED.
+NOTE: 2 observations deleted (region = "TEST").
+NOTE: The data set WORK.PARTICIPANTS_CLEAN has 208 observations and 11 variables.
+NOTE: There were 208 observations read from the data set WORK.PARTICIPANTS_CLEAN.
+NOTE: 8 observations with duplicate key values were deleted.
+NOTE: The data set WORK.PARTICIPANTS has 200 observations and 11 variables.
+```
+
+**The verification check.** Walk the arithmetic against the expectation: `210` raw `− 2` test rows `= 208`,
+then `208 − 8` duplicate-key rows `= 200`. The final log NOTE — **`WORK.PARTICIPANTS has 200 observations`** —
+matches the locked target exactly, so the row-count check passes. Confirm the cleaned categorical frequencies
+too:
+
+```sas
+proc freq data=work.participants;
+    tables sex arm site / nocum;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+  sex    Frequency        arm           Frequency        site       Frequency
+  F           104         coaching          100           North          70
+  M            96         usual_care        100           Central        66
+                                                           South          64
+```
+
+These match the locked cleaned frequencies — `sex` F 104 / M 96, `arm` coaching 100 / usual_care 100, `site`
+North 70 / Central 66 / South 64 — a second, independent confirmation that the right rows survived cleaning.
+
+**Interpretation.** The import-then-validate pass turned an untrusted 210-row file into a trustworthy 200-row
+analysis-ready dataset, and — crucially — it *documented* every removal and repair, so another analyst could
+rerun the program and land on the same 200. The flags (`age_flag`, `bmi_flag`, `sex_flag`) leave an audit
+trail rather than silently overwriting data. Note what this cleaned object is and is not: it is the
+participant *dimension* table (one row per person), **not** the screening table — do not expect its 200 to
+match the 594 screening rows you will join to it in Week 6. And nothing here is a health finding: these are
+synthetic, observational records, and any later group difference will be associational, not causal.
+
+### Worked example — transfer: validating a second imported file's column types
+
+**The task.** A new context, still synthetic. The wellness program also receives a monthly **device-export**
+file, `steps_export.csv`, with one row per participant per day and columns `participant_id`, `log_date`,
+`steps`, and `device_id`. Before you summarize daily steps, validate the import — and in particular catch a
+wrong *type*, the most common silent import failure. You expect `steps` to be numeric so PROC MEANS can average
+it; you suspect the export wrote some non-numeric placeholder into that column.
+
+**The code.** Import, then immediately run PROC CONTENTS to read the types.
+
+```sas
+proc import
+    datafile="/home/u_well/wellness/steps_export.csv"
+    out=work.steps_raw
+    dbms=csv replace;
+    getnames=yes;
+    guessingrows=max;
+run;
+
+proc contents data=work.steps_raw varnum;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+ #   Variable         Type     Len
+ 1   participant_id   Num        8
+ 2   log_date         Char      10
+ 3   steps            Char       6     <-- should be NUMERIC, came in as CHARACTER
+ 4   device_id        Char       8
+```
+
+**The verification check.** `steps` arrived as **Char 6**, not numeric — PROC IMPORT met at least one value it
+could not read as a number (perhaps a `"N/A"` or a stray comma), so it typed the whole column as text. Reading
+the type *before* analyzing is what catches this; a PROC MEANS on a character `steps` would simply fail with
+`Variable steps in list does not match type prescribed for this list`. The fix re-reads `steps` into a numeric
+variable and lets the log report the conversion:
+
+```sas
+data work.steps_clean;
+    set work.steps_raw(rename=(steps=steps_c));
+    steps = input(steps_c, ?? best12.);   /* ?? suppresses notes for known bad values */
+    drop steps_c;
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: Character values have been converted to numeric values at the places given by
+      (Line):(Column).
+NOTE: Invalid argument suppressed by the ?? modifier for 17 values of steps_c.
+NOTE: The data set WORK.STEPS_CLEAN has 5940 observations and 4 variables.
+```
+
+**Interpretation.** `steps` is now numeric and can be averaged, and the log told you the cost: **17 values**
+could not be parsed and became missing — a number worth recording in the verification note, because those 17
+are now excluded from any mean. The lesson transfers exactly from the wellness participants file: *import does
+not guarantee type*, the type is something you confirm with PROC CONTENTS, and the `Character values have been
+converted to numeric` log note is the silent conversion you must always read and verify, never ignore.
+
+## A common mistake
+
+The week's central trap is **trusting an import because it "ran."** PROC IMPORT printed no ERROR, output
+appeared, the program finished — so the data must be fine. It is not. Four specific slips, all silent:
+
+- **Skipping the row-count check.** The import NOTE said `210 observations`, you moved on, and you never
+  noticed that 210 included 8 duplicates and 2 test rows. Always compare the count NOTE to a number you wrote
+  down *first*; here the expectation was "210 raw, 200 after cleaning," and the gap *is* the cleaning work.
+- **Assuming the type is right.** A column of numbers that arrives as character (the `steps` case) or a date
+  that arrives as text (the `enroll_date` case) loads without complaint and breaks the *next* PROC. Read PROC
+  CONTENTS and confirm the type of every variable you will compute on, every time.
+- **Letting missing values hide.** The `age=199` typo and the 12 blank `sex` values do not announce
+  themselves. `NMISS` and a min/max range check make them visible; without that pass they quietly distort a
+  mean or a frequency.
+- **Mistaking a rendered listing for a verified run.** A clean-looking log and a tidy output table are not
+  evidence the numbers are right — on this site they are hand-authored and synthetic. The real safeguard is the
+  written verification note: expected vs actual counts, types confirmed, missingness checked, so someone else
+  can rerun and agree.
+
+The cure for all four is the same habit: import, then *interrogate* — count, type, key, range, `NMISS` — before
+you call the data clean.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission.
+
+1. After PROC IMPORT reads `participants_raw.csv`, which single log line tells you the row count, and what
+   number should it report for the raw wellness file? What number do you expect *after* cleaning, and why are
+   they different?
+2. PROC CONTENTS shows `enroll_date` as `Char 10`. In one sentence, why is that a problem, and which informat
+   converts it to a real SAS date?
+3. You run `proc means data=work.participants n nmiss min max; var age;`. The max is `199`. Name the locked
+   issue and the one-line `if/then` fix, and say why you also set a flag variable.
+4. Write the arithmetic that takes 210 raw rows to 200 clean participants. Which step removes the 2 test rows,
+   and which removes the 8 duplicate ids?
+5. In the transfer example, `steps` imported as `Char 6`. What would `proc means ... var steps;` do, and what
+   does the `Character values have been converted to numeric` note tell you to record in your verification note?
+6. A classmate says "PROC IMPORT ran with no errors, so the dataset is clean." Using this week's vocabulary,
+   name two checks that "no errors" does **not** perform.
+
+## Reading and source pointer
+
+For this week's procedures, the relevant **SAS documentation** pages are: the **PROC IMPORT** documentation
+(reading an external CSV/Excel file into a SAS dataset, and the `GETNAMES`/`GUESSINGROWS`/`DBMS` options); the
+**PROC CONTENTS** documentation (inspecting variable names, types, lengths, and formats after import); the
+**PROC FREQ** documentation (validating categorical keys and frequency expectations); and the **`MMDDYY`
+informat** reference (reading a character date string into a numeric SAS date). Use these as a syntax reading
+pointer when you adapt the idioms above — *learning to check the documentation* is itself a course skill. These
+notes are the course's own synthesis: grounded in the SAS documentation and open statistics references, but not
+copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, log excerpts, and **every numeric value on this page are hand-authored,
+synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The course **SAS
+execution/output gate is BLOCKED**; a rendered, syntax-highlighted code block or a typed listing is not
+evidence that the code runs or that the numbers are correct. The load-bearing values here — the **210** raw
+rows imported; the removal of **8** duplicate-`participant_id` rows and **2** internal test rows to reach
+**200** unique participants; the **`age = 199`** typo, **12** blank `sex` values, the character
+`enroll_date "08/24/2026"` needing the `MMDDYY10.` informat, and **2** impossible `baseline_bmi = 0` values;
+the cleaned frequencies `sex` **F 104 / M 96**, `arm` **coaching 100 / usual_care 100**, `site`
+**North 70 / Central 66 / South 64**; and the transfer file's **17** unparseable `steps` values — are drafted
+"as if run" for this draft site and cross-checked only for internal and narrative consistency. All data are
+**synthetic** (`call streaminit(20260824)`) and represent the `wellness-program study`, an observational
+program — not real health records. Do not treat any value here as a confirmed reference until the human/SAS-run
+sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week you take the trustworthy tables built here and *combine* them. Week 6 introduces PROC SQL and joins,
+bringing the cleaned 200-row `participants` table together with the 594-row `screenings` table on
+`participant_id` — and it turns this week's row-count habit into the join week's signature lesson: an **inner**
+join returns 594 rows while a **left** join returns 596, because 2 enrolled participants have no screenings.
+The discipline is identical — check the row count against what you expected, every time — applied now to the
+output of a join rather than an import. Week 6 has a companion lab.
+
+## See also
+
+- Previous week: [Week 4 — DATA step logic](week-04-data-step-logic.qmd) — the IF/THEN, missing-value, and
+  subsetting logic this week's cleaning step builds on.
+- Next week: [Week 6 — PROC SQL and joins](week-06-proc-sql-and-joins.qmd) — joining the cleaned tables and the
+  594-vs-596 row-count check.
+- Companion lab (Week 4): [Lab 4 — Build and validate a DATA step](../labs/lab-04-build-and-validate-a-data-step.qmd).
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — import, type, informat vs format,
+  validation, `NMISS`, and the verification-note convention.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE / WARNING / ERROR and
+  writing the per-step verification note.
+- [PROC reference](../resources/proc-reference.qmd) — PROC IMPORT, CONTENTS, FREQ, and MEANS side by side.

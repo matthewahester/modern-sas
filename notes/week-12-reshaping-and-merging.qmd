@@ -1,0 +1,478 @@
+---
+title: "Week 12 — Reshaping and merging data"
+subtitle: "Wide and long, merges and appends, with the row count checked"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC TRANSPOSE (the BY, ID, VAR statements) — supports reshaping a table between long and wide"
+  - "SAS documentation — DATA step MERGE with a BY statement and IN= dataset options — supports a key-matched merge with unmatched-key detection"
+  - "SAS documentation — PROC SORT (the BY statement, NODUPKEY) — supports the pre-sort a MERGE requires and a duplicate check"
+  - "SAS documentation — PROC APPEND (the BASE= and DATA= options, FORCE) — supports stacking a new cohort onto an existing table"
+toc: true
+---
+
+## The week question
+
+You have spent the term getting the wellness-program study into one analysis-ready shape: a DATA step
+built and cleaned `participants` (week 4), an import validated it from 210 raw rows to 200 unique people
+(week 5), a PROC SQL join assembled it with `screenings` and showed that an inner join returns **594** rows
+and a left join returns **596** (week 6), and the procedures of weeks 9–11 ran on the result. But the *shape*
+of a
+table is rarely fixed. Sometimes you need one row per participant with the three visits spread across columns
+(`bp_v1`, `bp_v2`, `bp_v3`) so a per-person model can use them; sometimes you need the opposite — one tall
+column of `systolic_bp` with a `visit_num` beside it — so a procedure can process visits as repeated rows. And
+sometimes a second cohort arrives and has to be **stacked** onto the existing table. This week's question is:
+**how do you reshape a table between long and wide, merge two tables on a key, and append new rows — while
+proving each move preserved exactly the rows you meant to keep?** The recurring teaching object is the same
+small invariant: the screenings table has **594** rows, a wide-then-long round trip must return **594**, and
+every merge gets its row count predicted before and checked after.
+
+## Why this matters
+
+Reshaping and merging are where a tidy analysis dataset is *built* — and where rows quietly appear, vanish, or
+multiply if you do not watch. It matters for three reasons. First, the **shape a procedure wants is not always
+the shape you have**: PROC REG and PROC LOGISTIC want one row per analysis unit, while a repeated-measures or
+visit-by-visit view wants the long form, so you will reshape constantly, and a reshape that loses a visit
+corrupts every downstream number. Second, the DATA step `MERGE` has a notorious failure mode — a **many-to-many
+merge** that the log flags as `WARNING: MERGE statement has more than one data set with repeats of BY values`
+— which silently produces wrong rows unless you sort correctly and use `IN=` flags. Third, this is the spine of
+the course's recurring test, *"could someone else rerun and verify this?"* A reshape or merge you did not
+count-check is a result on trust alone. The 594-preserved invariant is small enough to hold in your head and
+real enough to teach the habit that protects the whole pipeline: **predict the row count, then read it off the
+log and compare.**
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Use **PROC TRANSPOSE** to reshape the long `screenings` table (one row per visit) into a wide one-row-per-
+  participant table with `bp_v1`/`bp_v2`/`bp_v3`, using `BY participant_id`, `ID visit_num`, and `VAR
+  systolic_bp` — and reshape it back to the long form.
+- Predict and verify the row count of every reshape: 594 long rows → 198 wide rows → 594 long rows again, and
+  explain why the round trip must return the count it started with.
+- Write a DATA step **MERGE** of `participants` and `screenings` `BY participant_id`, sort both tables first
+  with **PROC SORT**, and use `IN=` flags to detect and count unmatched keys (the 2 unscreened participants).
+- Read the merge log for the load-bearing lines — the row count, and especially the
+  `WARNING: MERGE statement has more than one data set with repeats of BY values` that signals a many-to-many
+  bug — and name the fix.
+- Use **PROC APPEND** to stack a second synthetic cohort onto the base table and re-validate the combined row
+  count and variable types before trusting the result.
+- Interpret any merged or reshaped result as a statement about **synthetic, observational** data, never a
+  causal or real-health claim.
+
+## Core vocabulary
+
+Plain definitions of the week's SAS terms. The reshape and merge vocabulary is load-bearing — keep the grains
+straight.
+
+- **Long (tall) form** — one row per observation at the finest grain. Here `screenings` is long: one row per
+  participant *per visit*, so a participant with three visits occupies three rows, with `visit_num` marking
+  which.
+- **Wide form** — one row per higher-level unit, with the repeated measure spread across columns. The wide
+  screenings table has one row per *participant* and columns `bp_v1`, `bp_v2`, `bp_v3`.
+- **PROC TRANSPOSE** — the SAS procedure that pivots between long and wide. Its `BY` variable names the unit
+  that stays one-row (the participant), `ID` names the variable whose values become the new column names (the
+  visit number), and `VAR` names the variable whose values fill the cells (`systolic_bp`).
+- **MERGE (DATA step)** — combines tables side by side, matching rows on a `BY` key. **Both inputs must be
+  sorted by the BY variable first** (or carry a sort indicator), or the step errors.
+- **`BY` statement** — names the key the MERGE (or by-group processing) matches on, here `participant_id`.
+- **`IN=` dataset option** — a temporary 0/1 flag (`IN=inA`) that is 1 on rows where the current BY group came
+  from that input. The standard way to detect unmatched keys after a merge.
+- **PROC SORT** — orders a table by one or more `BY` variables; required before a MERGE. With `NODUPKEY` it
+  also removes duplicate-key rows (a duplicate check).
+- **PROC APPEND** — stacks the rows of one table (`DATA=`) onto the bottom of another (`BASE=`) without
+  rewriting the base from scratch. `FORCE` lets it proceed when the two structures differ slightly — usually a
+  warning sign, not a convenience.
+- **Many-to-many merge** — a DATA step MERGE where the BY key repeats in **both** inputs. SAS does not form the
+  relational cross-product you might expect; it produces a misaligned, almost-always-wrong result and warns
+  about "repeats of BY values." A bug to design out, not a feature to use.
+
+## Concept development
+
+### Long to wide with PROC TRANSPOSE
+
+The `screenings` table is **long**: 594 rows, one per participant-visit, with `visit_num` taking values 1, 2, 3.
+To put the three blood-pressure readings on one row per participant — the shape a per-person model wants — pivot
+with PROC TRANSPOSE. The `BY` variable is the unit that stays one row (`participant_id`); the `ID` variable
+supplies the new column names (`visit_num` → suffixes `1`, `2`, `3`); the `VAR` variable supplies the cell
+values (`systolic_bp`). PROC TRANSPOSE requires the input **sorted by the BY variable**, so sort first.
+
+```sas
+libname wp "/home/u_wellness/data";   /* permanent library for the study */
+
+proc sort data=wp.screenings out=work.scr_sorted;
+  by participant_id visit_num;
+run;
+
+proc transpose data=work.scr_sorted
+               out=wp.bp_wide (drop=_name_)
+               prefix=bp_v;            /* columns become bp_v1 bp_v2 bp_v3 */
+  by participant_id;                   /* one row out per participant      */
+  id visit_num;                        /* values 1/2/3 name the columns    */
+  var systolic_bp;                     /* the values that fill the cells   */
+run;
+```
+
+The synthetic log and a slice of the output:
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 594 observations read from the data set WORK.SCR_SORTED.
+NOTE: The data set WP.BP_WIDE has 198 observations and 4 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.04 seconds
+```
+
+```text
+Output (synthetic, not executed) — first rows of WP.BP_WIDE
+
+  participant_id   bp_v1   bp_v2   bp_v3
+  --------------   -----   -----   -----
+           10001     132     128     126
+           10002     119     121     118
+           10003     145     140     141
+           ...
+```
+
+**What to check.** Predict the output count from the grain: 594 visit rows, 3 per participant, collapse to
+$594 / 3 = 198$ participant rows — and the log's "198 observations" confirms it. The 4 variables are
+`participant_id` plus `bp_v1`, `bp_v2`, `bp_v3`. The workflow move is *reshape, then confirm the new grain*: if
+the wide table had come back with 200 rows you would suspect the 2 unscreened participants had leaked in, and if
+it had 196 you would suspect a participant lost a visit. Note the `drop=_name_` — PROC TRANSPOSE adds a
+`_NAME_` column recording which variable was transposed; dropping it keeps the output clean.
+
+### Wide back to long — and why the round trip must return 594
+
+A wide table is convenient for a per-person model but wrong for a procedure that wants visits as repeated rows.
+Transpose the wide table back to long, and the round trip becomes a built-in check: it must return the **594**
+rows you started with. Here the three `bp_v` columns become the `VAR` list, and PROC TRANSPOSE stacks them into
+one column.
+
+```sas
+proc transpose data=wp.bp_wide
+               out=wp.bp_long (rename=(col1=systolic_bp))
+               name=visit_label;
+  by participant_id;
+  var bp_v1 bp_v2 bp_v3;     /* the three columns to stack back into one */
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 198 observations read from the data set WP.BP_WIDE.
+NOTE: The data set WP.BP_LONG has 594 observations and 3 variables.
+NOTE: PROCEDURE TRANSPOSE used (Total process time):
+      real time           0.04 seconds
+```
+
+**What to check.** The count must come full circle: 198 wide rows × 3 stacked columns = **594** long rows,
+matching the original `screenings` count exactly. This is the cardinal reshape check — **a lossless round trip
+returns the row count it started with**. If the back-transpose had returned 600 or 588, a reshape silently
+gained or dropped rows and you would stop and find out why before trusting anything downstream. The new
+`visit_label` column holds the source column name (`bp_v1`/`bp_v2`/`bp_v3`); you would typically derive a clean
+numeric `visit_num` from it before analysis. The workflow move: *use the reshape round trip as its own
+verification.*
+
+### MERGE with a BY key and IN= flags — and the sort that must come first
+
+The DATA step `MERGE` combines `participants` and `screenings` side by side, matching on `participant_id`.
+Unlike a PROC SQL join, MERGE **requires both inputs sorted by the BY variable first** — skip the sort and the
+step errors with `ERROR: BY variables are not properly sorted`. The `IN=` flags then let you detect which keys
+matched. This is the DATA step route to the same 594/596 contrast you met in PROC SQL (week 6), now with
+unmatched-key detection built in.
+
+```sas
+proc sort data=wp.participants out=work.part_sorted; by participant_id; run;
+proc sort data=wp.screenings   out=work.scr_sorted;  by participant_id; run;
+
+data wp.merged;
+  merge work.part_sorted (in=inPart)
+        work.scr_sorted  (in=inScr);
+  by participant_id;
+  matched_screen = (inScr = 1);   /* 1 if this participant had a screening */
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 200 observations read from the data set WORK.PART_SORTED.
+NOTE: There were 594 observations read from the data set WORK.SCR_SORTED.
+NOTE: The data set WP.MERGED has 596 observations and 9 variables.
+NOTE: PROCEDURE DATASTEP used (Total process time):
+      real time           0.05 seconds
+```
+
+**What to check.** No `WARNING` about repeats of BY values appeared, so the merge was clean — `participants`
+has one row per `participant_id` (unique key), so even though `screenings` repeats the key three times per
+person, only one side repeats and the merge is well-defined. The output is **596** rows: the 594 screening rows
+plus the 2 unscreened participants, who appear once each with missing screening fields and `matched_screen = 0`.
+That matches the locked left-join count from week 6 — the DATA step MERGE here behaves like a left/full match
+because every key in `participants` is carried through. The workflow move: *sort, merge, then use `IN=` to turn
+the row-count gap into a flag you can count.* A quick `proc freq data=wp.merged; tables matched_screen;` would
+show 594 matched and 2 unmatched, accounting for the entire gap.
+
+### Stacking rows with PROC APPEND
+
+Merging puts tables **side by side** (more columns); appending stacks them **top to bottom** (more rows). When a
+second cohort of participants arrives with the *same* columns, PROC APPEND adds its rows to the base table
+without rewriting the base from scratch.
+
+```sas
+proc append base=wp.participants
+            data=wp.cohort2_participants;   /* same column structure */
+run;
+```
+
+```text
+SAS log (synthetic)
+
+NOTE: Appending WP.COHORT2_PARTICIPANTS to WP.PARTICIPANTS.
+NOTE: There were 40 observations read from the data set WP.COHORT2_PARTICIPANTS.
+NOTE: 40 observations added.
+NOTE: The data set WP.PARTICIPANTS has 240 observations and 8 variables.
+```
+
+**What to check.** Predict the combined count: 200 base rows + 40 new rows = **240**, and the log's "240
+observations" confirms no rows were dropped or duplicated. Crucially, check that the column **types** match
+before appending — if `cohort2` stored `participant_id` as character while the base stores it as numeric, plain
+APPEND errors and `FORCE` would only paste over the problem. The workflow move: *append, then re-validate the
+count and the types*, because a structural mismatch is exactly the kind of bug APPEND can hide behind `FORCE`.
+
+## Worked examples
+
+### Worked example — the wellness-program study: a lossless wide↔long round trip
+
+**The task.** Reshape the long `screenings` table (594 rows, one per participant-visit) into a wide
+one-row-per-participant table of `bp_v1`/`bp_v2`/`bp_v3`, then reshape it back to long and confirm the round
+trip preserved all 594 rows. The data are **synthetic; seed `streaminit(20260824)`**, observational, and **not
+real health data**.
+
+**The code.**
+
+```sas
+/* 1. long -> wide: one row per participant, three bp columns */
+proc sort data=wp.screenings out=work.scr_sorted;
+  by participant_id visit_num;
+run;
+
+proc transpose data=work.scr_sorted out=wp.bp_wide (drop=_name_) prefix=bp_v;
+  by participant_id;
+  id visit_num;
+  var systolic_bp;
+run;
+
+/* 2. wide -> long again: the round-trip check */
+proc transpose data=wp.bp_wide out=wp.bp_back (rename=(col1=systolic_bp)) name=visit_label;
+  by participant_id;
+  var bp_v1 bp_v2 bp_v3;
+run;
+```
+
+**The synthetic output and log.**
+
+```text
+SAS log (synthetic)
+
+NOTE: There were 594 observations read from the data set WORK.SCR_SORTED.
+NOTE: The data set WP.BP_WIDE has 198 observations and 4 variables.
+NOTE: There were 198 observations read from the data set WP.BP_WIDE.
+NOTE: The data set WP.BP_BACK has 594 observations and 3 variables.
+```
+
+```text
+Output (synthetic, not executed) — PROC MEANS on WP.BP_BACK, systolic_bp
+
+  Variable      N      Mean     Std Dev      Min    Median       Max
+  -----------  ---   -------   ---------   ------   ------   -------
+  systolic_bp  594   128.4       14.2        96      127       178
+```
+
+**The verification check.** Three counts must line up. The long table starts at **594**; the wide table is
+$594 / 3 = $ **198** participant rows; the back-transposed table returns to $198 \times 3 = $ **594** rows —
+exactly where it began, so the round trip was lossless. As a content check, PROC MEANS on the round-tripped
+`systolic_bp` reproduces the locked study summaries — mean **128.4**, SD **14.2**, min 96, median 127, max 178,
+$n = 594$ — confirming no value was altered, only rearranged. Before trusting the wide table you would also
+check `NMISS(bp_v1) = NMISS(bp_v2) = NMISS(bp_v3) = 0`, since a participant missing a visit would leave a
+missing cell that a per-person model must handle.
+
+**The interpretation.** The same 594 systolic-BP readings now exist in two shapes, and you can move between them
+without losing a row. That is the whole point of a reshape: the *numbers* are invariant; only their *layout*
+changes to suit the next procedure. The wide form feeds a per-participant model (one row, three columns); the
+long form feeds a visit-level or repeated-measures view. Nothing here is a health finding — the values are
+synthetic and observational — and the reshape changes nothing about that. The workflow move: *reshape, round-
+trip, and let the recovered count plus the recovered summary statistics prove the move was clean.*
+
+### Worked example — transfer: appending a second cohort and re-validating
+
+**The task.** Switch to a new context to show the merge/append idioms transfer. Imagine a different synthetic
+table from a campus tutoring program, `wp.tutoring_fall` — one row per student with columns `student_id`,
+`center` (char: "Main" / "East"), `sessions` (num), and `passed` (num 1/0). A spring cohort,
+`wp.tutoring_spring`, arrives with the *same* columns and must be stacked on, then the combined table validated.
+The data are **synthetic; seed `streaminit(20260824)`** and illustrative only (these are *not* locked study
+numbers).
+
+**The code.**
+
+```sas
+proc append base=wp.tutoring_fall
+            data=wp.tutoring_spring;   /* identical column structure */
+run;
+
+/* re-validate: combined count, types, and the pass rate by center */
+proc sql;
+  select center,
+         count(*)      as n_students,
+         mean(passed)  as pass_rate format=5.2   /* mean of 0/1 = a proportion */
+  from wp.tutoring_fall
+  group by center
+  order by center;
+quit;
+```
+
+**The synthetic output and log.**
+
+```text
+SAS log (synthetic)
+
+NOTE: Appending WP.TUTORING_SPRING to WP.TUTORING_FALL.
+NOTE: There were 150 observations read from the data set WP.TUTORING_SPRING.
+NOTE: 150 observations added.
+NOTE: The data set WP.TUTORING_FALL has 450 observations and 4 variables.
+```
+
+```text
+Output (synthetic, not executed)
+
+  center   n_students   pass_rate
+  ------   ----------   ---------
+  East            180        0.62
+  Main            270        0.55
+```
+
+**The verification check.** Predict the combined count: 300 fall rows + 150 spring rows = **450**, matching the
+log's "450 observations" — APPEND added every spring row and dropped none. The two `center` counts must sum to
+the total: $180 + 270 = 450$, confirming the grouped query saw the whole stacked table, not just the fall half.
+Because `passed` is 0/1, its `MEAN` is a **pass proportion**, which must lie in $[0, 1]$ — 0.62 and 0.55 both do;
+a value of 1.4 would mean `passed` was not actually 0/1 (a type or coding problem) and you would stop. You would
+also confirm the spring table's `student_id` and `passed` were **numeric** like the base before appending,
+since a character/numeric mismatch is exactly what `FORCE` can paste over.
+
+**The interpretation.** The stacked table now holds both cohorts, and the pass-rate query runs on all 450
+students. Same machinery as a wellness append — predict the count, confirm the types, check that group sizes sum
+to the whole — applied to a wholly different table, which is the point: APPEND and the row-count check are
+general workflow tools, not study-specific tricks. The cautions hold too: these are invented numbers, the
+center comparison is observational (center is not a randomized treatment), and a visible gap between 0.62 and
+0.55 is not a tested or practically important one.
+
+## A common mistake
+
+The week's signature trap is the **many-to-many DATA step MERGE** — a merge where the BY key repeats on *both*
+sides — together with the two habits that prevent it and the reshape count-loss that mimics it.
+
+- **The many-to-many merge.** If you MERGE two tables that *both* repeat `participant_id` — say you merged
+  `screenings` (3 rows per id) with another visit-level table that also has 3 rows per id — the DATA step does
+  **not** form the relational cross-product you might expect from SQL. It aligns the repeated rows positionally
+  and produces a misaligned, almost-always-wrong result, warning: `WARNING: MERGE statement has more than one
+  data set with repeats of BY values.` That warning is not cosmetic — it means the output rows are unreliable.
+  **The fix:** keep one side unique on the key (merge the *dimension* table, which has one row per id, against
+  the fact table), or do the many-to-many combination in **PROC SQL**, which makes the cross-product explicit
+  and lets you predict its row count.
+
+- **Forgetting the pre-sort.** A DATA step MERGE requires both inputs **sorted by the BY variable**. Skip a
+  `PROC SORT` and the step fails with `ERROR: BY variables are not properly sorted on data set ...`. **The fix
+  is the habit:** sort every input by the key immediately before the MERGE, and remember PROC SQL joins do *not*
+  need this, so a snippet that works as a join will not work as a raw merge until you sort.
+
+- **The unchecked reshape.** A PROC TRANSPOSE that silently gains or loses rows looks like success — there is no
+  error, just a different count. If the long→wide step returned 200 rows instead of 198, the 2 unscreened
+  participants leaked in; if the wide→long round trip returned 588 instead of 594, six readings vanished.
+  Neither errors. **The fix is the same cardinal habit:** predict the count from the grain (594 → 198 → 594),
+  read the actual count off the log, and compare. A round trip that does not return its starting count is a bug,
+  not a result.
+
+The deeper point, identical to the join week: SAS will not tell you the reshape or merge was *wrong*, only what
+it *did*. The row count — and on a merge, the BY-repeats warning — is the cheapest verification in the whole
+workflow, and skipping it is how a broken table reaches your model looking perfectly healthy.
+
+## Low-stakes self-checks (ungraded)
+
+For self-study only — ungraded, nothing to submit.
+
+1. The long `screenings` table has 594 rows. Predict the row count after a PROC TRANSPOSE to wide
+   (one row per participant, `bp_v1`/`bp_v2`/`bp_v3`), and the count after transposing back to long. State the
+   arithmetic for each.
+2. In one sentence each, say what the `BY`, `ID`, and `VAR` statements do in a long-to-wide PROC TRANSPOSE, and
+   which variable supplies the new column names.
+3. A DATA step MERGE fails with `ERROR: BY variables are not properly sorted`. Name the missing step and write
+   the one line that fixes it.
+4. Explain what `IN=inScr` gives you after `merge part (in=inPart) scr (in=inScr); by participant_id;`, and how
+   you would use it to count the 2 unscreened participants.
+5. A classmate's MERGE produces a `WARNING: MERGE statement has more than one data set with repeats of BY
+   values`. Name the bug and the two fixes (keep one side unique, or use PROC SQL).
+6. After `proc append base=A data=B;`, the log says A now has 450 observations, but you expected 440. Name two
+   things you would check to find the 10-row discrepancy.
+
+## Reading and source pointer
+
+For this week's syntax, see the official **SAS documentation for PROC TRANSPOSE** — specifically the `BY`,
+`ID`, and `VAR` statements that drive a long↔wide reshape and the `PREFIX=`/`NAME=` options for naming the
+output — and the **DATA step `MERGE` statement** documentation, especially the `BY` statement and the `IN=`
+dataset option used to detect unmatched keys, plus the note on **"repeats of BY values"** that warns of a
+many-to-many merge. See also **PROC SORT** (the `BY` statement and `NODUPKEY`) for the pre-sort a MERGE
+requires, and **PROC APPEND** (`BASE=`, `DATA=`, `FORCE`) for stacking rows. Use these as a reading pointer in
+the course's own words: practise finding the authoritative syntax and the exact option names yourself, because
+"learning to check the documentation" is a course skill. These notes are the course's own synthesis: grounded in
+the SAS documentation and open statistics references, but not copied from them. SAS® and all SAS Institute
+product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The
+load-bearing numbers here — the **594** long screening rows, the **198** wide participant rows, the **594**
+round-tripped rows, the **200**/**594**/**596** merge counts and the **2** unmatched unscreened participants,
+the round-tripped PROC MEANS summary (mean **128.4**, SD **14.2**, min 96, median 127, max 178, $n = 594$), and
+the illustrative (non-locked) transfer figures (300 + 150 = **450** tutoring rows and the 0.62 / 0.55 pass
+rates) — are drafted "as if run" for this draft site and cross-checked only for internal and narrative
+consistency against the locked wellness-program study (seed `streaminit(20260824)`). The course **SAS
+execution/output gate is BLOCKED**; a rendered code block or typed listing is not evidence the code runs or the
+numbers are right. Do not treat any value here as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we put the seed to work: **simulation and random generation**. Week 13 uses `call streaminit(20260824)`
+and the `RAND` function to generate data under a known truth, then runs the same analyses thousands of times to
+estimate properties of the procedure itself — empirical **power ≈ 0.99** under the observed arm effect, an
+empirical **Type I rate ≈ 0.05** under the null, and the sampling distribution of the mean `systolic_bp`
+centered near 128.4 with SE ≈ 0.58. Reshaping and merging are exactly the moves you will use to assemble each
+simulated dataset before analysing it, so this week's row-count discipline carries straight into the simulation
+loop. Week 13 has a **companion lab** on simulation and repeated analyses.
+
+## See also
+
+- Previous week: [Week 11 — logistic regression and categorical outcomes](week-11-logistic-regression-categorical.qmd) —
+  the model that ran on the one-row-per-participant analysis dataset this week reshapes.
+- Next week: [Week 13 — simulation and random generation](week-13-simulation-and-random-generation.qmd) —
+  generating and re-analysing data with the study seed.
+- Related: [Week 6 — PROC SQL and joins](week-06-proc-sql-and-joins.qmd) — the join route to the same 594/596
+  contrast, side by side with this week's MERGE.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — long vs wide, key, grain, merge vs append,
+  character vs numeric, and the log levels.
+- [PROC reference](../resources/proc-reference.qmd) — PROC TRANSPOSE, MERGE, PROC SORT, and PROC APPEND placed
+  beside the other course procedures, with the verification check for each.
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE / WARNING / ERROR and
+  checking row counts before and after a reshape or merge.

@@ -1,0 +1,487 @@
+---
+title: "Week 7 — Summaries, tables, and the midterm"
+subtitle: "PROC MEANS, FREQ, and UNIVARIATE — and the midterm practical (Fri Oct 9)"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC MEANS / SUMMARY — supports descriptive statistics (N, NMISS, mean, std) tables"
+  - "SAS documentation — PROC FREQ — supports one-way and cross-tabulated frequency tables"
+  - "SAS documentation — PROC UNIVARIATE — supports distributional checks (quantiles, extremes, normality)"
+toc: true
+---
+
+## The week question
+
+Last week you joined the two tables of the wellness-program study and learned to *trust the row count* — an
+inner join of `participants × screenings` gives **594** rows, a left join gives **596**, and the difference is
+the two enrolled participants who were never screened. You now have a clean, joined, analysis-ready dataset.
+This week's workflow question is the next move: **once the data are clean, how do you describe them in tables
+you and a reader can trust?** That means producing the right summary — a mean and spread for a continuous
+variable, a count and percent for a categorical one, a distributional check before you commit to a model — and
+reading each table critically: how many rows actually went into it, how many were missing, and whether the
+statistic SAS computed is the one you meant to read. Three procedures do almost all of this work: **PROC
+MEANS** for descriptive statistics, **PROC FREQ** for counts and percents, and **PROC UNIVARIATE** for a
+deeper look at a distribution. This week also marks the **midterm practical, Friday October 9, in class**,
+which covers the workflow from the SAS environment through summaries and reporting.
+
+## Why this matters
+
+Summary tables are the first output anyone actually reads, and they are where a quiet data problem becomes
+visible — or stays hidden. Three reasons this week is load-bearing. First, **a summary is only as honest as its
+N.** PROC MEANS reports a mean over the *non-missing* rows; if you do not look at how many rows that was, you
+can report a "mean" computed on far fewer observations than you think. Knowing the difference between `N` (how
+many values were used) and `NMISS` (how many were missing) is the whole discipline. Second, **the right
+statistic for the variable's type.** A continuous variable like `systolic_bp` wants a mean, a standard
+deviation, and quantiles; a categorical variable like `sex` or `arm` wants counts and percents from PROC FREQ —
+a mean of `sex` is meaningless, while a mean of a 0/1 variable like `goal_met` is a *proportion*, which is
+exactly what you want. Third, **summaries are the bridge to the procedures ahead.** Before the t-test in week 9
+or the regression in week 10, you describe the data — check the spread, look for impossible values, confirm the
+groups are balanced. A surprising mean or a lopsided frequency table caught here saves a wrong model later. The
+recurring test holds: would someone else, reading your table and its N, be able to understand and trust it?
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Produce a descriptive-statistics table with **PROC MEANS** (or PROC SUMMARY), request the statistics you want
+  by name, and read **N versus NMISS** so you know how many rows the mean was actually computed on.
+- Build a one-way frequency table with **PROC FREQ** for a categorical variable, and read counts, percents, and
+  the missing row, confirming the totals add up to what you expect.
+- Run a **PROC UNIVARIATE** distributional check — quantiles, the five lowest and highest values, a normality
+  read — and use the **extreme observations** to catch impossible or out-of-range data before modeling.
+- Explain why the **mean of a 0/1 variable is a proportion** (so `mean(goal_met) = 0.41` means 41% met goal),
+  and why a mean of a categorical variable is the wrong statistic.
+- Summarize **by group** correctly — sort first (`PROC SORT`) or use a `CLASS` statement — and check that the
+  group counts match the clean frequencies (`arm`: coaching 100 / usual_care 100).
+- After every summary, state **what the log should say** (rows read, no unexpected WARNING/ERROR) and run a
+  **verification check** (N, NMISS, a sanity range), and interpret the table for the analytic question without
+  overclaiming — the study is synthetic and observational, not a real health finding.
+
+## Core vocabulary
+
+The week's SAS terms, defined plainly. These mirror the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd) and the
+[PROC reference](../resources/proc-reference.qmd); keep the variable's *type* and the statistic's *meaning*
+aligned.
+
+- **PROC MEANS** — the descriptive-statistics procedure for **numeric** variables. By default it prints `N`,
+  `Mean`, `Std Dev`, `Minimum`, and `Maximum`; you can request others (`MEDIAN`, `NMISS`, `Q1`, `Q3`, `CLM`)
+  by listing them on the `PROC MEANS` line. PROC SUMMARY is the same engine with output going to a dataset
+  instead of the listing.
+- **PROC FREQ** — the frequency procedure for **categorical** variables. A one-way `TABLES sex;` gives the
+  count, percent, and cumulative percent per level; a two-way `TABLES arm*goal_met;` cross-tabulates. It is the
+  right tool to confirm category counts and spot a stray or misspelled level.
+- **PROC UNIVARIATE** — the distributional-detail procedure for one numeric variable: moments, a full set of
+  quantiles, tests of location, **and the five lowest / five highest values (the extreme observations)** — the
+  fastest way to see an impossible value like a `baseline_bmi` of 0.
+- **N versus NMISS** — `N` is the count of **non-missing** values a statistic used; `NMISS` is the count of
+  **missing** values that were dropped. A mean is computed over `N`, never over `N + NMISS`. Always read both.
+- **The mean of a 0/1 variable** — for a numeric indicator coded `1`/`0`, the arithmetic mean **is the
+  proportion of 1s.** So `mean(goal_met) = 0.41` is read as "41% met goal," not as an abstract average.
+- **CLASS versus BY** — both summarize by group. `CLASS arm;` groups within one pass and needs **no prior
+  sort**; `BY arm;` produces a separate sub-table per group but **requires the data sorted by `arm` first**
+  (`PROC SORT`), or you get `ERROR: Data set is not sorted`.
+- **Quantile / percentile** — a value below which a given percent of the data falls; the **median** is the 50th
+  percentile, `Q1`/`Q3` the 25th/75th. PROC UNIVARIATE prints the full ladder.
+
+## Concept development
+
+### PROC MEANS — descriptive statistics, and reading N vs NMISS
+
+PROC MEANS is the workhorse for describing a numeric variable. The minimal call names the dataset, the
+variables, and (optionally) the statistics you want. List statistics on the `PROC MEANS` line itself; if you
+list none, you get the five defaults (`N`, `Mean`, `Std Dev`, `Min`, `Max`).
+
+```sas
+libname well "/home/u_wellness/data";   /* permanent library from week 2 */
+
+proc means data=well.screenings n nmiss mean std min median max maxdec=2;
+    var systolic_bp steps_k;
+run;
+```
+
+The synthetic log confirms the rows read and the procedure completing without complaint:
+
+```text
+SAS log (synthetic)
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: PROCEDURE MEANS used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.03 seconds
+```
+
+The synthetic output:
+
+```text
+Output (synthetic, not executed)
+                          The MEANS Procedure
+
+ Variable        N    NMiss        Mean     Std Dev     Minimum      Median     Maximum
+ ------------------------------------------------------------------------------------------
+ systolic_bp   594        0      128.40       14.20       96.00      127.00      178.00
+ steps_k       594        0        7.45        2.60        1.20        7.30       16.80
+ ------------------------------------------------------------------------------------------
+```
+
+**What the log should say.** `There were 594 observations read` — exactly the joined screening grain from week
+6 — and a clean `PROCEDURE MEANS used` line with **no WARNING and no ERROR**. **Verification check.** Read
+`N = 594` and `NMiss = 0` together: every screening row carried a `systolic_bp`, so the mean of **128.4** was
+computed on all 594, not a silent subset. Sanity-range the extremes — `Minimum 96`, `Maximum 178` — against
+what a systolic blood-pressure reading can plausibly be; both are in range, so no impossible value slipped
+through. **Interpretation.** Across the 594 synthetic screenings, mean systolic pressure is **128.4** with a
+standard deviation of **14.2** — moderate spread, roughly symmetric since the median (127) sits close to the
+mean. The workflow move: you *read* the joined `screenings` table, *created* a descriptive table, the log
+*confirmed* the 594-row count, and you *validated* that nothing was missing and the range is sensible. This is
+a summary you could hand to a reader and defend.
+
+### PROC FREQ — counts, percents, and confirming the category levels
+
+A mean is the wrong statistic for a categorical variable. For `sex`, `arm`, and `site` you want **counts and
+percents**, and PROC FREQ delivers them — one `TABLES` statement, one variable per request (or a `*` for a
+cross-tab).
+
+```sas
+proc freq data=well.participants;
+    tables sex arm site;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+                          The FREQ Procedure
+
+ sex     Frequency     Percent    Cumulative Frequency    Cumulative Percent
+ ---------------------------------------------------------------------------
+ F             104       52.00                    104                 52.00
+ M              96       48.00                    200                100.00
+
+ arm           Frequency     Percent
+ ----------------------------------------
+ coaching          100       50.00
+ usual_care        100       50.00
+
+ site          Frequency     Percent
+ ----------------------------------------
+ North              70       35.00
+ Central            66       33.00
+ South              64       32.00
+```
+
+**What the log should say.** `There were 200 observations read from the data set WELL.PARTICIPANTS` — the
+*cleaned* participant count, not the 210 raw rows — and no WARNING/ERROR. **Verification check.** Add the
+frequencies down each table: `sex` 104 + 96 = **200**; `arm` 100 + 100 = **200**; `site` 70 + 66 + 64 =
+**200**. All three totals equal the cleaned participant count, so no row was dropped or double-counted, and no
+stray level (a third `sex` value, a misspelled `"Cental"`) appears. If PROC FREQ had silently omitted missing
+values, a footnote `Frequency Missing = n` would warn you — here there is none on these cleaned variables.
+**Interpretation.** The study is balanced by design: an even **100/100** split between the `coaching` and
+`usual_care` arms, a near-even sex split (**104 F / 96 M**), and three sites of similar size. That balance
+matters for the comparisons ahead — a lopsided arm split would complicate the week-9 t-test. The workflow move:
+you confirmed the category structure of the *cleaned* table before trusting any group comparison built on it.
+
+### PROC UNIVARIATE — a distributional check, and the extreme observations
+
+PROC MEANS gives you the headline numbers; **PROC UNIVARIATE** gives you the shape — a full quantile ladder,
+moments, location tests, and, most usefully for validation, the **five lowest and five highest values**. That
+extremes panel is the fastest catch for an impossible or out-of-range value before it poisons a model.
+
+```sas
+proc univariate data=well.screenings;
+    var systolic_bp;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+                          The UNIVARIATE Procedure
+                          Variable:  systolic_bp
+
+         Moments
+ N                  594        Mean           128.40
+ Std Deviation     14.20       Variance       201.64
+
+         Quantiles (Definition 5)
+ 100% Max     178      75% Q3      138
+  99%         164      50% Median  127
+  95%         153      25% Q1      119
+  90%         147      10%         110
+                        0% Min      96
+
+         Extreme Observations
+   ----Lowest----        ----Highest----
+   Value      Obs        Value      Obs
+     96       311          168       402
+     98        57          171       129
+     99       220          174        88
+    101       146          176        15
+    102        490         178        47
+```
+
+**What the log should say.** Again `There were 594 observations read`, and `PROCEDURE UNIVARIATE used` with no
+WARNING/ERROR. **Verification check.** Scan the **Extreme Observations**: the five lowest run 96–102 and the
+five highest 168–178 — clinically high at the top, but all *possible* systolic readings, with no `0`, no
+negative, no 999 placeholder. Compare the quantiles against the PROC MEANS summary: `Median 127` and
+`Max 178` match exactly, an internal-consistency check that the two procedures read the same column. The
+interquartile range (Q3 − Q1 = 138 − 119 = 19) confirms the moderate spread the standard deviation implied.
+**Interpretation.** The distribution is roughly symmetric and unimodal, slightly right-tailed at the top end,
+with no data-quality red flags in the extremes — so `systolic_bp` is in good shape to feed the group
+comparisons later. The workflow move: UNIVARIATE is a **validation** step, not just a description — you look at
+the tails *specifically* to catch the kind of impossible value (the `baseline_bmi = 0` from week 5) that a
+mean would quietly absorb.
+
+### Summarizing by group — and the mean of a 0/1 variable
+
+Two more moves complete the week. First, **summarize by group.** The simplest path in PROC MEANS is a `CLASS`
+statement, which groups within a single pass and needs **no prior sort**:
+
+```sas
+proc means data=well.screenings n mean std maxdec=2;
+    class completed;
+    var systolic_bp;
+run;
+```
+
+Using `BY completed;` instead would do the same job but **requires** `proc sort data=well.screenings;
+by completed; run;` first — otherwise the log throws `ERROR: Data set WELL.SCREENINGS is not sorted in
+ascending sequence`. `CLASS` avoids that trap; reach for `BY` only when you genuinely want separate sub-tables.
+
+Second, **the mean of a 0/1 variable is a proportion.** `goal_met` is numeric, coded `1` (met goal) / `0` (did
+not), so PROC MEANS will happily average it — and that average *is* the proportion meeting goal:
+
+```sas
+proc means data=well.screenings n sum mean maxdec=4;
+    var goal_met;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+ Variable      N        Sum         Mean
+ -----------------------------------------
+ goal_met    594     246.0000      0.4141
+ -----------------------------------------
+```
+
+**Verification check.** `Sum = 246` is the count of 1s; `N − Sum = 594 − 246 = 348` is the count of 0s; and
+`Mean = 246/594 = 0.4141`. Cross-check against PROC FREQ of the same variable, which would show
+`1 = 246 (41.4%) / 0 = 348 (58.6%)` — the proportion read two ways agrees. **Interpretation.** About **41%**
+of screenings met the activity goal. The lesson is conceptual: for a 0/1 indicator the **mean is the
+proportion**, so the same number answers "what's the average?" and "what fraction met goal?". Read it as a
+percent — never as a blood-pressure-style "average of 0.41."
+
+## Worked examples
+
+### Worked example — the wellness-program study summary table (the recurring slice)
+
+**The task.** Produce the headline descriptive table for the wellness-program study: the spread of
+`systolic_bp` and `steps_k` across all screenings, the goal-met proportion, and the categorical balance of the
+participant table — the exact summary you would put at the top of the analysis report. The data are
+**synthetic; seed set, `call streaminit(20260824)`**, and the study is **observational** — never a real health
+finding.
+
+**The code.** One MEANS call for the continuous outcomes and the 0/1 outcome, one FREQ call for the categorical
+attributes:
+
+```sas
+libname well "/home/u_wellness/data";
+
+proc means data=well.screenings n nmiss mean std min median max maxdec=2;
+    var systolic_bp steps_k;
+run;
+
+proc means data=well.screenings n sum mean maxdec=4;
+    var goal_met;
+run;
+
+proc freq data=well.participants;
+    tables sex arm site;
+run;
+```
+
+**The synthetic log:**
+
+```text
+SAS log (synthetic)
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: There were 594 observations read from the data set WELL.SCREENINGS.
+NOTE: There were 200 observations read from the data set WELL.PARTICIPANTS.
+NOTE: PROCEDURE FREQ used (Total process time):
+      real time           0.05 seconds
+```
+
+**The synthetic output (the load-bearing numbers, all locked):**
+
+```text
+Output (synthetic, not executed)
+ systolic_bp:  N=594  NMiss=0  Mean=128.40  Std=14.20  Min=96  Median=127  Max=178
+ steps_k:      N=594  NMiss=0  Mean=7.45    Std=2.60
+ goal_met:     N=594  Sum=246  Mean=0.4141        (246 met goal / 348 not)
+ sex:   F 104 (52%) / M 96 (48%)        arm:  coaching 100 / usual_care 100
+ site:  North 70 / Central 66 / South 64
+```
+
+**The verification check.** Three counts must line up. The two MEANS calls read **594** screening rows (the
+week-6 inner-join grain), `NMiss = 0` so the means used every row; the FREQ call read **200** cleaned
+participants, and each one-way table sums to 200 (104+96, 100+100, 70+66+64). The goal-met arithmetic checks:
+`Sum 246 / N 594 = 0.4141`, and `594 − 246 = 348` not met. The `systolic_bp` range (96–178) is plausible. With
+all three reconciled, the table is trustworthy.
+
+**The interpretation.** Across **594** synthetic screenings, mean systolic pressure is **128.4** (SD **14.2**)
+and mean daily steps **7.45** thousand; **41%** of screenings met the activity goal. The participant pool is
+balanced — an even **100/100** arm split, **104 F / 96 M**, three comparably sized sites. This is a clean,
+honest descriptive picture and the launch pad for the procedures ahead. State the limits plainly: these are
+**synthetic** values, and the study is **observational** — any later arm difference will be *associational*,
+not causal, because the synthetic arms are not described as randomized. The summary describes the sample; it
+does not, by itself, support a health claim.
+
+### Worked example — transfer: a UNIVARIATE distributional check on enrollment age
+
+**The task.** Switch context to a **new variable and procedure pairing**: before anyone models age, run a
+PROC UNIVARIATE distributional check on `age` in the cleaned `participants` table to confirm the week-5
+cleaning actually worked — specifically that the impossible **age typo of 199** was coerced to missing and no
+longer sits in the data. Same synthetic study, different variable, different validation question.
+
+**The code.**
+
+```sas
+proc means data=well.participants n nmiss min max maxdec=1;
+    var age;
+run;
+
+proc univariate data=well.participants;
+    var age;
+run;
+```
+
+**The synthetic output:**
+
+```text
+Output (synthetic, not executed)
+ The MEANS Procedure
+   age:  N=199  NMiss=1  Min=22.0  Max=64.0
+
+ The UNIVARIATE Procedure   Variable: age
+   Quantiles:  100% Max 64   75% Q3 51   50% Median 44   25% Q1 36   0% Min 22
+
+   Extreme Observations
+     ----Lowest----        ----Highest----
+     Value   Obs           Value   Obs
+       22    188             61      19
+       23     74             62     143
+       24    101             63      57
+       25     12             64      90
+       26    160             64     167
+```
+
+**The verification check.** Read `NMiss = 1` against `N = 199`: of the 200 cleaned participants, **one** `age`
+is missing — that is the former `199` typo, now correctly coerced to a SAS missing `.` during week-5 cleaning,
+so it was *excluded* from the statistics rather than averaged in. Confirm it in the extremes: the highest value
+is **64**, not 199 — the impossible value is gone from the tail. The range (22–64) is plausible for an adult
+wellness program. **The interpretation.** The cleaning held: the `age` typo is missing, not lurking as a
+199-year-old participant that would have dragged the mean upward and corrupted any age-based model. The
+workflow move is the same one as the recurring example — read N against NMISS, then look at the extremes — but
+the *purpose* here is to **verify a prior cleaning step downstream**. A summary table is not just a description;
+it is where you confirm the data are what you think they are before you trust a procedure built on them.
+
+## A common mistake
+
+The week's trap has three faces, all the same root error — **reading a statistic without reading the N behind
+it, or reading the wrong statistic for the variable's type.**
+
+- **Trusting a mean without its NMISS.** PROC MEANS computes the mean over *non-missing* rows. If `NMISS` is
+  large and you do not look, you report a "mean over 594 screenings" that was really computed on far fewer.
+  *Always print `N` and `NMISS` together* and read them as a pair. A mean is only as honest as the count it
+  was built on.
+- **Forgetting that missing-value handling differs by procedure.** PROC MEANS silently drops missing values
+  from the statistic; PROC FREQ by default *excludes* missing from percents but prints a `Frequency Missing`
+  footnote — and a filter like `if age > 30` would *exclude* missings while `if age < 30` would *include*
+  them (missing sorts below any value). The fix is the same: check `NMISS`, read the missing footnote, and
+  never assume a procedure handled missing the way you expected.
+- **Averaging a categorical variable, or mis-reading a 0/1 mean.** A "mean of `sex`" is meaningless — that is
+  a PROC FREQ job. Conversely, the mean of the 0/1 `goal_met` *is* a proportion (0.41 = 41% met goal), not an
+  abstract average; read it as a percent. Match the statistic to the type: counts/percents for categorical,
+  mean/SD/quantiles for continuous, and a proportion for a 0/1 indicator.
+
+A quieter version: running `BY arm;` **without sorting first**, which stops the step with `ERROR: Data set is
+not sorted`. Either `PROC SORT ... BY arm;` first, or use `CLASS arm;`, which needs no sort. And remember the
+build-wide caveat — every number here is **synthetic and unverified**; a clean-looking table is not a verified
+one.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission.
+
+1. Write a PROC MEANS call that reports `N`, `NMISS`, `MEAN`, `STD`, and `MEDIAN` for `systolic_bp` on the
+   594-row `screenings` table. What value should `NMISS` be, and what does that tell you about the mean of
+   **128.4**?
+2. Run PROC FREQ on `arm` and `site` in your head. What three numbers should the `arm` table show, and what
+   three should `site` show? Confirm each table sums to the cleaned participant count of **200**.
+3. Explain in one sentence why `mean(goal_met) = 0.4141` is a *proportion*. From it, recover the count of
+   screenings that met goal and the count that did not (you should get 246 and 348).
+4. You want a separate `systolic_bp` summary for each `completed` level. Write it two ways — once with `CLASS`,
+   once with `BY` — and say which one requires a `PROC SORT` first and why.
+5. PROC UNIVARIATE on a numeric variable prints an **Extreme Observations** panel. In one sentence, why is that
+   panel the fastest way to catch a data-quality problem like the week-5 `baseline_bmi = 0`?
+6. A classmate reports "the average `sex` is 0.52." Name the mistake using this week's vocabulary, and say which
+   procedure they should have used instead.
+
+## Reading and source pointer
+
+This week's procedures are documented in the official **SAS documentation** (documentation.sas.com): the
+**PROC MEANS / PROC SUMMARY** page for descriptive statistics and the statistic keywords you request (`N`,
+`NMISS`, `MEAN`, `STD`, `MEDIAN`, and the `CLASS` versus `BY` distinction); the **PROC FREQ** page for one-way
+and cross-tabulated frequency tables and how missing values are handled in the counts and percents; and the
+**PROC UNIVARIATE** page for the quantile ladder, the moments, and the extreme-observations panel used as a
+validation check. Read those pages as a pointer to the authoritative syntax and option list — *learning to
+check the documentation is itself a course skill* — but note they are proprietary, so consult them at the
+source rather than expecting them reproduced here. These notes are the course's own synthesis: grounded in the
+SAS documentation and open statistics references, but not copied from them. SAS® and all SAS Institute product
+names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS programs, log excerpts, and every numeric value on this page are **hand-authored,
+synthetic, and were NOT run** — SAS is proprietary and is not executed in this build. The course **SAS
+execution/output gate is BLOCKED**; a rendered, syntax-highlighted code block or a typed listing is *not*
+evidence that the code runs or that the numbers are right. The load-bearing values here — `systolic_bp` mean
+**128.4**, SD **14.2**, min 96, median 127, max 178 over **N = 594**; `steps_k` mean **7.45**; `goal_met`
+sum **246** / N **594** / mean **0.4141** (246 met, 348 not); the FREQ counts `sex` **104 F / 96 M**, `arm`
+**100 / 100**, `site` **70 / 66 / 64** summing to the cleaned **200**; and the transfer-example `age` summary
+(**N = 199, NMiss = 1**, range 22–64, the 199 typo now missing) — are the locked values of the synthetic
+**wellness-program study** (`call streaminit(20260824)`), drafted "as if run" and cross-checked only for
+internal and narrative consistency. The data are synthetic and the analysis observational; nothing here is a
+real health finding. Do not treat any value as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we take these same summaries from tables to **pictures**: PROC SGPLOT for a histogram of
+`systolic_bp`, and ODS for sending report-ready output to HTML and PDF. The descriptive numbers you locked
+this week — mean 128.4, the moderate spread, the goal-met proportion — become the figure captions and the
+report tables you can hand to a reader. The **midterm practical (Friday, October 9, in class)** sits at the end
+of this week and covers the workflow so far: the SAS environment and project setup, libraries and datasets,
+variable attributes, DATA step logic, importing, cleaning, validation, PROC SQL joins, and the summaries and
+reporting from this week. The authoritative date, format, and logistics for the midterm live in **Blackboard**.
+
+## See also
+
+- Previous week: [Week 6 — PROC SQL & joins](week-06-proc-sql-and-joins.qmd) — the joined, analysis-ready table
+  these summaries describe, and the 594-vs-596 row-count check.
+- Next week: [Week 8 — Visualization & ODS output](week-08-visualization-and-ods-output.qmd) — turning these
+  summary tables into SGPLOT figures and ODS HTML/PDF reports.
+- Looking ahead to the procedures: [Week 9 — t-tests, ANOVA & group comparisons](week-09-ttests-anova-group-comparisons.qmd)
+  — where the balanced arm and site counts confirmed here feed the group comparisons.
+- [PROC reference](../resources/proc-reference.qmd) — PROC MEANS, FREQ, and UNIVARIATE side by side with the
+  other course procedures, and the verification check to run after each.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — N vs NMISS, character vs numeric, missing
+  values, and the log's NOTE / WARNING / ERROR lines.
+- [Log & verification guide](../resources/log-and-verification-guide.qmd) — reading the log as primary output
+  and the row-count / type / NMISS verification habits.

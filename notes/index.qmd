@@ -1,0 +1,152 @@
+---
+title: "Notes"
+subtitle: "The weekly SAS analytics-workflow spine"
+page-type: orientation
+verified: false
+toc: true
+---
+
+The notes are the backbone of the course. There is one note per week, and reading the current week's note
+before class — and again after — is the single most reliable way to keep up. Every note follows the same
+shape, so once you learn to read one, you can read them all. The throughline is never SAS syntax for its own
+sake; it is the **analytics workflow** — moving from messy data to documented, reproducible results, where
+the recurring test is "would someone else be able to understand, rerun, and verify this?"
+
+Before you start, two things to keep open and one posture to hold. Keep the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd) and the
+[PROC reference](../resources/proc-reference.qmd) alongside the notes — they collect the vocabulary (library,
+libref, dataset, observation, variable, format vs informat, the PDV) and the procedures side by side. The
+posture: here, **SAS is not executed.** SAS is proprietary, there is no SAS on this build
+environment, so every SAS program, every log excerpt, and every PROC output table you see on this site is
+**hand-authored and synthetic** — drafted "as if run," but not run. A syntax-highlighted code block proves
+nothing about whether the code would run or whether the numbers are right. Read accordingly.
+
+## How to read a week
+
+Each weekly note is built from the same parts, in the same order. Knowing the anatomy lets you skim for what
+you need and study with intent:
+
+- **The week question.** A single workflow question that the week exists to answer — how to clean a DATA
+  step, how to join two tables and trust the row count, how to read a t-test the procedure hands you. Hold it
+  in mind as you read; everything else is in service of it.
+- **Concept development.** The core ideas, built up in a few short sections from the workflow move toward a
+  precise, runnable SAS idiom. Each subsection introduces the idea, then **shows the SAS code** in a plain,
+  non-executable code block, then the **synthetic log and PROC output**, and then what to *check*. This is the
+  part to read slowly — and where the load-bearing distinctions (character vs numeric, missing-value
+  propagation, the join grain) are made explicit.
+- **Worked examples.** Each idea is worked on the recurring **wellness-program study** (a synthetic
+  community/employer wellness-screening dataset — "RiverCity Wellness," two related tables joined by
+  `participant_id`) — the task is set up, the SAS code is shown, the synthetic log/output is read, the
+  **verification check** is run, and the result is interpreted in sentences — plus one *transfer* example in a
+  fresh context, so you see the workflow move rather than memorize one dataset. The data are **synthetic; seed
+  set, `call streaminit(20260824)`**, and the study is observational — never a real health finding.
+- **Reading the log.** On every code block the note says **what the log should say** — the `NOTE` lines you
+  expect (`NOTE: There were 210 observations read ...`, `NOTE: The data set WORK.PARTICIPANTS has 200
+  observations and 8 variables.`), and the `WARNING`/`ERROR` lines that mean something is wrong (a
+  many-to-many merge, a bad informat, a silent character-to-numeric conversion). Learning to read the log is a
+  graded-everywhere course skill: **NOTE** is informational, **WARNING** may be a bug, **ERROR** stopped the
+  step.
+- **A verification check.** After the log, a concrete check — a row count before and after a join, a PROC
+  CONTENTS or type check, an `NMISS` count, a sanity range. The recurring object is the two-table grain: the
+  `participants` table has **200** cleaned rows, `screenings` has **594**, an inner join is **594** rows and a
+  left join is **596** (the 2 unscreened participants surface). Always check your row count after a join.
+- **A common mistake.** The workflow, type, log, or validation trap students most often hit on the topic —
+  named plainly so you can watch for it: a number stored as character that blocks PROC MEANS, missing values
+  silently included by `if x < 5`, an unchecked join, treating a *p*-value as importance, treating an odds
+  ratio as a risk ratio, or treating observational data as causal.
+- **Ungraded self-checks.** A few low-stakes practice prompts to test yourself. These are *self-check only* —
+  no points, no submission.
+- **Reading and source pointer.** Where to read more: the relevant **SAS documentation** page for the week's
+  procedures (linked and described in the course's own words — never reproduced, since the SAS docs are
+  proprietary), and, on the statistical-procedure weeks (9, 10, 11), the relevant *Introduction to Modern
+  Statistics (IMS)* chapter for the statistical background — with the reminder that these notes are the
+  course's own synthesis.
+- **Verification & reproducibility status.** An honest note that the SAS code, log excerpts, and every number
+  on the page are drafted and synthetic, were **not run**, and that the SAS execution/output gate is
+  **BLOCKED** — this is a draft course site.
+- **Looking ahead.** A sentence or two connecting this week to the next, so the workflow arc — environment →
+  data → cleaning → joins → summaries → procedures → simulation → report — stays visible.
+
+Read the SAS code as something you will type and run yourself in your own SAS session (SAS Studio via SAS
+OnDemand for Academics, SAS Viya for Learners, or a university-supported install — see the
+[SAS access & setup](../resources/sas-access-setup.qmd) page). On this site it is static teaching code; the
+analysis becomes real when *you* run it and read *your* log.
+
+## The four parts
+
+The fifteen weeks fall into four parts. Each part has a job, and the weeks within it build on one another —
+the same wellness-program study carried forward as the workflow grows from import to documented report.
+
+**Part I — The SAS environment and the data foundation.** What SAS is for in modern analytics, how the
+environment and a project are organized, how libraries and datasets and variable attributes work, and the
+DATA step logic that creates, cleans, and subsets data.
+
+1. [Week 1 — What SAS is for now](week-01-what-sas-is-for-now.qmd)
+2. [Week 2 — SAS environment & project setup](week-02-sas-environment-and-project-setup.qmd)
+3. [Week 3 — Libraries, datasets, variables, formats](week-03-libraries-datasets-variables-formats.qmd)
+4. [Week 4 — DATA step logic](week-04-data-step-logic.qmd)
+
+**Part II — Getting data analysis-ready.** Importing real-looking messy data and validating it, joining
+tables with PROC SQL and checking the relationship, and producing the summaries and tables that describe a
+clean dataset (the midterm sits here).
+
+1. [Week 5 — Importing, cleaning & validating](week-05-importing-cleaning-validating.qmd)
+2. [Week 6 — PROC SQL & joins](week-06-proc-sql-and-joins.qmd)
+3. [Week 7 — Summaries, tables & midterm](week-07-summaries-tables-and-midterm.qmd)
+4. [Week 8 — Visualization & ODS output](week-08-visualization-and-ods-output.qmd)
+
+**Part III — Statistical procedures.** Comparing groups with t-tests and ANOVA, modeling a continuous outcome
+with linear regression, and a binary outcome with logistic regression — each with its assumptions stated and
+its claims kept honest (significant is not important; an odds ratio is not a risk ratio; observational is not
+causal).
+
+1. [Week 9 — t-tests, ANOVA & group comparisons](week-09-ttests-anova-group-comparisons.qmd)
+2. [Week 10 — Linear regression](week-10-linear-regression.qmd)
+3. [Week 11 — Logistic regression & categorical outcomes](week-11-logistic-regression-categorical.qmd)
+
+**Part IV — Reshaping, simulation, and reproducible reporting.** Reshaping and merging data and validating
+the result, simulating to study a procedure's behavior, assembling the whole pipeline as one reproducible
+report, and a closing synthesis that supports the final analytics project.
+
+1. [Week 12 — Reshaping & merging data](week-12-reshaping-and-merging.qmd)
+2. [Week 13 — Simulation & random generation](week-13-simulation-and-random-generation.qmd)
+3. [Week 14 — Reproducible SAS analysis report](week-14-reproducible-sas-analysis-report.qmd)
+4. [Week 15 — Final analytics project & review](week-15-final-analytics-project-and-review.qmd)
+
+## A note on the worked numbers
+
+Every result you will meet in the notes comes from the one synthetic study, and the numbers are **locked** so
+they stay consistent from week to week: the t-test of `systolic_bp` by `arm` gives coaching $125.9$ vs
+usual_care $130.8$, a difference of $-4.9$ with $t = -4.27$ on $196$ df and $p < .0001$; the ANOVA by `site`
+gives $F(2, 195) = 5.10$, $p = 0.0071$; the regression of `systolic_bp` on `age` and `baseline_bmi` gives
+$R^2 = 0.214$; the logistic model gives an `arm` odds ratio of $1.78$ (95% CI $1.28$–$2.47$) with a
+C-statistic of $0.69$; and the simulation gives power $\approx 0.99$ and a Type I rate $\approx 0.05$. These
+are **synthetic teaching values, not real findings** — the study is observational (the arm comparison is
+associational, not causal, since the synthetic arms are not described as randomized), and an odds ratio is
+**not** a risk ratio. Every page repeats the verification caveat below.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS programs, log excerpts, and every numeric value shown across these notes — the
+study's row counts ($200$ participants, $594$ screenings, the inner-join $594$ vs left-join $596$), the
+summary statistics, and all the procedure output (t, F, $R^2$, the odds ratio, the simulation rates) — are
+**hand-authored, synthetic, and were NOT run.** SAS is proprietary and is not executed in this build, so the
+course **SAS execution/output gate is BLOCKED**. A rendered, syntax-highlighted code block or a typed listing
+is *not* evidence that the code runs or that the numbers are right. Do not treat any value on this site as a
+confirmed reference until the human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## See also
+
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, libref, dataset, observation,
+  variable, format vs informat, the PDV, and the log's NOTE/WARNING/ERROR lines.
+- [PROC reference](../resources/proc-reference.qmd) — the procedures (MEANS, FREQ, UNIVARIATE, SQL, TTEST,
+  GLM, REG, LOGISTIC, TRANSPOSE, SURVEYSELECT) side by side.
+- [SAS access & setup](../resources/sas-access-setup.qmd) — getting into the course-designated SAS environment
+  and organizing a project.

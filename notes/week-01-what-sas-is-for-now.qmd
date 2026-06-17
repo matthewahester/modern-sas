@@ -1,0 +1,430 @@
+---
+title: "Week 1 — What SAS is for now"
+subtitle: "Professional analytics, reproducibility, logs, output, and workflow"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — SAS programming overview (DATA step and PROC step) — supports what a SAS program is"
+  - "SAS documentation — the SAS log (NOTE / WARNING / ERROR messages) — supports reading the log as primary output"
+  - "SAS documentation — PROC PRINT — supports a first look at a dataset"
+  - "Introduction to Modern Statistics (IMS), Ch. 1 — supports what data analytics is and the observational-vs-causal caution"
+toc: true
+---
+
+## The week question
+
+You arrive at this course already knowing some statistics — means, a t-test, a regression line, a p-value —
+and probably some way of handling data, whether a spreadsheet, R, or Python. So the honest first question is
+not "what buttons do I press in SAS?" It is: **what is SAS *for*, in a modern statistical-analytics workflow,
+and what does working professionally in it actually demand of you?** The short answer is that SAS is an
+**ecosystem for moving from messy data to documented, reproducible analytic results** — not just a place to
+run a procedure and copy a number. This week sets that frame. We will name the analytics workflow end to end,
+explain why **reproducibility and traceability** are the point rather than a nicety, and do the single most
+important small skill of the whole course: **read a SAS log** and decide whether what just happened is what you
+intended. No statistics get computed this week; we are learning to see the workflow before we start building
+it.
+
+A note you will see on every page of this site: in this build, **SAS is shown as static code and is not run**.
+Every program, every log line, and every output table here is **hand-authored and synthetic** — labelled as
+such — so the page renders without a live SAS session. Treating a tidy listing as proof that something ran is
+exactly the habit this course trains you out of, so we flag it openly from day one.
+
+## Why this matters
+
+It matters for three reasons that recur in every later week. First, **SAS is a professional analytics
+environment, not a calculator.** In a real analysis you import data someone else collected, discover it is
+dirty, clean and validate it, join it to another table, summarize it, model it, and report it — and someone
+later has to trust the result. SAS is built around that whole arc, with the **SAS log** as a running, auditable
+record of what each step did. Learning SAS as "the language that runs `PROC TTEST`" misses the 80% of real
+work that happens before and after the procedure.
+
+Second, **reproducibility and traceability are the deliverable.** The recurring test in this course is one
+sentence: *would someone else be able to understand, rerun, and verify this?* A result you cannot rerun is a
+result held on trust alone. A program that runs top to bottom with no manual point-and-click, with a log that
+shows what it did, is reproducible; a sequence of clicks that produced a number once is not. This is why we
+start with the log rather than with a procedure.
+
+Third, **the log is your first and best instrument.** SAS rarely fails loudly. It will happily read a number
+stored as text, silently drop rows, or merge two tables the wrong way and hand you a plausible-looking table
+built on a mistake. The log is where it tells you — in `NOTE`, `WARNING`, and `ERROR` lines — what really
+happened. Reading the log carelessly (or not at all) is the single most common way analyses go quietly wrong,
+and learning to read it is the skill this week installs before any procedure can lean on it.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Explain, in plain language, **what SAS is for** in modern statistical analytics — an ecosystem for moving
+  from messy data to documented, reproducible results — and why it is not a generic programming course, a
+  generic intro-stats course, or a syntax reference.
+- Name the **analytics workflow** end to end: import → validate/clean → analyze → report → verify, and say what
+  each stage produces and who relies on it next.
+- Distinguish the two kinds of step in a SAS program — the **DATA step** (build/clean data) and the **PROC
+  step** (analyze/report) — without yet writing either from scratch.
+- **Read a SAS log:** tell `NOTE`, `WARNING`, and `ERROR` apart, and find the "observations read" / "dataset
+  created" lines that report row counts.
+- Run the workflow's first **verification check** — confirm the row count the log reports is the row count you
+  expected — and say why an unchecked count is a latent bug.
+- State the course's standing cautions: the study data are **synthetic and observational** (so differences are
+  associational, not causal), and a **rendered listing is not a verified run**.
+
+## Core vocabulary
+
+The week's terms, defined plainly. These mirror the
+[SAS workflow glossary](../resources/sas-workflow-glossary.qmd); keep them straight from the start.
+
+- **SAS** — a professional environment for the full analytics workflow: reading data, preparing and validating
+  it, running statistical procedures, and producing reproducible reports. Pronounced "sass"; `SAS®` is a
+  trademark of SAS Institute Inc.
+- **Program** — a text file of SAS statements that runs **top to bottom** with no manual clicking. A
+  reproducible program *is* the analysis.
+- **DATA step** — the part of SAS that **builds or transforms** a dataset row by row (import, clean, compute,
+  subset). It ends with `run;`.
+- **PROC step** — a **procedure** call (e.g. `PROC PRINT`, `PROC MEANS`) that **analyzes or reports** an
+  existing dataset. It also ends with `run;` (or `quit;` for a few procedures).
+- **Dataset** (SAS dataset) — a table of **observations** (rows) and **variables** (columns), stored in a
+  **library**. We meet libraries properly next week.
+- **The log** — SAS's running, auditable account of what each step did. It is **primary output**, not noise.
+  Three message types: **`NOTE`** (informational — counts, "dataset created"), **`WARNING`** (something may be
+  wrong but the step ran), **`ERROR`** (the step failed).
+- **Output / listing** — the results a PROC produces (a printed table, summary statistics, a model fit), sent
+  to an **ODS** destination (HTML by default). On this site, output is shown as a typed, synthetic listing.
+- **Reproducibility** — the property that someone else, given your program and data, gets your result again.
+  **Traceability** — being able to follow how each number was produced, step by logged step.
+- **Verification check** — a deliberate confirmation after a step that the result matches what you expected
+  (a row count, a variable type, a count of missing values). The course's habit: *validate before you trust*.
+
+## Concept development
+
+### What SAS is for: the analytics workflow, not a procedure
+
+Picture the work the way a professional analyst experiences it, as a pipeline with five stages, each feeding
+the next:
+
+> **import → validate / clean → analyze → report → verify**
+
+You **import** raw data someone else produced (a CSV, a database extract, a hand-built file). You **validate
+and clean** it — because real data has duplicates, typos, blanks, wrong types, and impossible values — until
+you have an *analysis-ready* table you trust. You **analyze** it with the appropriate procedure. You **report**
+the result in a form another person can read. And throughout, you **verify**: you check that the log says what
+you expect, that row counts survive each step, that types are right, that missing values are accounted for. SAS
+is built around this entire arc, which is why we treat it as an analytics **environment** rather than a language
+for one procedure. (We describe this pipeline in prose deliberately — there is no emitted figure, so every
+load-bearing number on this page is stated in the text, not read off a diagram.)
+
+Two cautions ride along the whole pipeline and will recur all term. The data here are **synthetic** (seed
+`call streaminit(20260824)`) and stand in for a wellness-screening program — they are **not real health
+data**. And the study is **observational**: even when we later find a difference between groups, it is an
+**association, not a cause**, because the groups were not randomized. We name these now so they are never a
+surprise.
+
+### A SAS program has two kinds of step: DATA and PROC
+
+Almost everything in SAS is one of two things. A **DATA step** builds or transforms a dataset; a **PROC step**
+runs a procedure on a dataset that already exists. You do not need to write either from scratch this week — you
+need to **recognize** them and know which produces data and which produces analysis. Here is the smallest
+honest example: a tiny DATA step that creates a two-row dataset, followed by a PROC step that prints it.
+
+```sas
+/* DATA step: build a small dataset (rows are observations, columns are variables) */
+data work.demo;
+    input participant_id age sex $;
+    datalines;
+1001 54 F
+1002 47 M
+;
+run;
+
+/* PROC step: report the dataset we just built */
+proc print data=work.demo;
+run;
+```
+
+What the **log** should say — two `NOTE` lines that report counts, and no `WARNING`/`ERROR`:
+
+```text
+SAS log (synthetic)
+NOTE: The data set WORK.DEMO has 2 observations and 3 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+NOTE: There were 2 observations read from the data set WORK.DEMO.
+NOTE: PROCEDURE PRINT used (Total process time):
+      real time           0.00 seconds
+```
+
+The **output** the PROC produced (a printed listing of the dataset):
+
+```text
+Output (synthetic, not executed)
+ Obs    participant_id    age    sex
+   1          1001         54     F
+   2          1002         47     M
+```
+
+**What to check.** The DATA step reports `2 observations and 3 variables`, and PROC PRINT reports it `read ...
+2 observations` — both match what we put in, so nothing was silently dropped. Note the `$` after `sex` in the
+`input` statement: it declares `sex` as **character**. Character-versus-numeric is load-bearing in SAS, and the
+log is where a type mistake would first show up. The workflow move here: we **created** a dataset, **read** the
+log to confirm its shape, and **verified** the count before trusting the printed table.
+
+### The log is primary output: NOTE, WARNING, ERROR
+
+Treat the log as the most important thing SAS gives you. After every step, SAS writes messages, and the type of
+message tells you how worried to be:
+
+- **`NOTE`** — informational. The load-bearing ones report **counts**: `NOTE: There were N observations read
+  from the data set ...` and `NOTE: The data set WORK.X has N observations and K variables.` Read these
+  *every* time; they are how you catch a silently dropped or duplicated row.
+- **`WARNING`** — the step ran, but something may be wrong. A classic is `WARNING: MERGE statement has more
+  than one data set with repeats of BY values`, which signals a many-to-many merge bug. A warning means *stop
+  and look*, even though you got output.
+- **`ERROR`** — the step failed and produced nothing usable. SAS often keeps going to the next step, so an
+  error early in a long program can leave you staring at stale output if you do not read the log.
+
+A non-clean run looks like this — a tiny typo (`prnt` instead of `print`) that turns into an `ERROR`:
+
+```text
+SAS log (synthetic)
+72   proc prnt data=work.demo;
+          ----
+          1
+ERROR 1-322: Statement is not valid or it is used out of proper order.
+73   run;
+NOTE: The SAS System stopped processing this step because of errors.
+```
+
+**What to check.** No table was produced — the `ERROR` line and "stopped processing this step" tell you the
+PROC never ran, so any table on screen is from an earlier step, not this one. The workflow move: **read the log
+first, the output second.** A pretty listing with an unread error above it is the most dangerous artifact in
+analytics, because it looks finished and is not.
+
+### Reproducibility and traceability: the deliverable, not a nicety
+
+The reason we obsess over the log is that the **deliverable of an analysis is something another person can
+rerun and verify** — not a single number you once produced. A reproducible SAS analysis is **one program** that
+runs top to bottom: it points at its data with a `libname`, sets the options it relies on, fixes any random
+seed with `call streaminit(20260824)`, and ends with verification notes that state the counts and checks. A
+sequence of point-and-click actions that yielded a number once is the opposite — untraceable and unrepeatable.
+
+This is also why **a rendered code block is not evidence the code ran.** On this site nothing is executed; the
+listings are synthetic. In your own work the discipline is the same in spirit: do not trust output you have not
+verified, and write your analysis so the *log itself* is the proof of what happened. Every later week ends with
+the same two-part habit — *what the log should say*, and a *verification check* — and it all starts here.
+
+## Worked examples
+
+### Worked example — the wellness-program study: a first log read
+
+**The task.** Meet the recurring study. "RiverCity Wellness" (synthetic; seed `call streaminit(20260824)`;
+**not real health data**) enrolls participants and records follow-up screenings. The raw `participants` file
+arrives with **210 rows**. We do not analyze anything yet — we just read it in and **read the log** to learn the
+shape of what we have. This is the first stage of the workflow, *import*, and the first verification of the
+term: *does the row count match what we were told to expect?*
+
+```sas
+/* Stage 1 of the workflow: read the raw participants file and look at it.
+   No cleaning yet -- we are learning to read the log. */
+data work.participants_raw;
+    infile "/home/rivercity/participants_raw.csv" dsd firstobs=2;
+    length sex $1 site $8 arm $11 region $12 enroll_date $10;
+    input participant_id age sex $ site $ arm $ enroll_date $ baseline_bmi region $;
+run;
+
+proc print data=work.participants_raw(obs=5);
+    title "First 5 raw participant rows (pre-cleaning)";
+run;
+```
+
+The **log** SAS writes (synthetic) — note the count and the type-conversion warning we will chase next week:
+
+```text
+SAS log (synthetic)
+NOTE: The infile "/home/rivercity/participants_raw.csv" is:
+      Filename=/home/rivercity/participants_raw.csv,
+      ... 211 records ...
+NOTE: 210 records were read from the infile.
+NOTE: The data set WORK.PARTICIPANTS_RAW has 210 observations and 8 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.04 seconds
+NOTE: There were 210 observations read from the data set WORK.PARTICIPANTS_RAW.
+NOTE: PROCEDURE PRINT used (Total process time):
+      real time           0.01 seconds
+```
+
+The **output** (synthetic) — the first five rows, with `enroll_date` still imported as text:
+
+```text
+Output (synthetic, not executed)
+ Obs    participant_id    age    sex    site      arm          enroll_date    baseline_bmi    region
+   1         1001          54     F      North     coaching     08/24/2026         27.4        metro
+   2         1002          47     M      Central   usual_care   08/24/2026         31.1        rural
+   3         1003          33     F      South     coaching     08/25/2026         24.8        metro
+   4         1004          61     M      North     usual_care   08/26/2026         29.0        suburb
+   5         1005          29     F      Central   coaching     08/26/2026         22.6        metro
+```
+
+**The verification check.** The log reports **210 observations and 8 variables** — that is exactly the raw row
+count we were told to expect, so the import did not silently lose or add rows. We also note two things the log
+and listing hint at, which become next week's and week 4–5's work: `enroll_date` is sitting as the **character**
+string `"08/24/2026"` (it needs the `MMDDYY10.` informat to become a real SAS date), and we already know this
+raw file hides quality problems — **8 duplicate `participant_id` rows**, **2 internal test rows**, an `age`
+typo of **199**, **12 blank `sex`** values, and **2 impossible `baseline_bmi = 0`** values. Cleaning those is
+how 210 raw rows become **200 unique participants**.
+
+**Interpretation.** All we have done is *import and look* — but we have already exercised the whole workflow
+posture in miniature: we **read** a file, the log **confirmed** the row count, and we **verified** it against
+the expected **210**. We have *not* analyzed anything, made any health claim, or trusted any number we did not
+check. The number 210 (raw) versus 200 (cleaned) is the term's first running thread — the recurring "check your
+row counts" object — and it will reappear at every join, merge, and summary. Nothing here is a finding; it is a
+**clean, counted, traceable starting point**.
+
+### Worked example — transfer: SAS versus a spreadsheet on a sensor log
+
+**The task.** A new, unrelated context (still synthetic — these are not study numbers). A building's HVAC system
+writes an hourly **sensor log**; an analyst is handed a file of **8,760 hourly temperature readings** (one
+year) and asked, "what is going on with the data?" Compare two ways of answering: a spreadsheet, and a SAS
+program. The point is *not* the temperature — it is the **workflow difference**.
+
+In a **spreadsheet** you would open the file, scroll, maybe sort a column, type a formula into a cell, copy it
+down, and read a number off the screen. It works once. But there is no record of *what you did*: if a reader
+asks "how did you get this, and is it right on next month's file?", the honest answer is "I clicked around." The
+steps are invisible and the result is not rerunnable.
+
+In **SAS** the same task is a short program whose log *is* the record:
+
+```sas
+/* Transfer context: a year of hourly sensor readings (synthetic, not the study) */
+data work.sensors;
+    infile "/home/facilities/hvac_hourly.csv" dsd firstobs=2;
+    input reading_id timestamp $ temp_c;
+run;
+
+proc print data=work.sensors(obs=3);
+    title "First 3 sensor readings";
+run;
+```
+
+The **log** (synthetic) reports the shape, so the count is auditable rather than eyeballed:
+
+```text
+SAS log (synthetic)
+NOTE: 8760 records were read from the infile.
+NOTE: The data set WORK.SENSORS has 8760 observations and 3 variables.
+NOTE: There were 8760 observations read from the data set WORK.SENSORS.
+```
+
+The **output** (synthetic) — a first look at three rows:
+
+```text
+Output (synthetic, not executed)
+ Obs    reading_id    timestamp           temp_c
+   1         1        2026-01-01 00:00      19.8
+   2         2        2026-01-01 01:00      19.6
+   3         3        2026-01-01 02:00      20.1
+```
+
+**The verification check.** The log says **8,760 observations** — exactly 365 × 24, the number of hourly
+readings a non-leap year should contain — so nothing is missing or duplicated at import. If next month's file
+arrives, you **rerun the same program** and the log re-checks the count for you; in the spreadsheet you would
+have to remember and redo every click.
+
+**Interpretation.** The transfer makes the week's thesis concrete: SAS's value is not a fancier formula bar —
+it is that the **analysis is a reproducible, logged program** another person can rerun and verify. The
+spreadsheet gives an answer; the SAS program gives an answer **plus a traceable record of how it was produced
+and a built-in count check**. That is what "professional analytics workflow" means, and it is why every page
+in this course pairs code with *what the log should say* and a verification check.
+
+## A common mistake
+
+The week's trap has two faces, and they share a root: **trusting output without reading the log** (failure-mode
+"reading the log carelessly"), and its diagnostic-site cousin, **treating a shown listing as a real run**.
+
+- *Glancing at the table and skipping the log.* The most common real-world error is to scroll straight to the
+  PROC output, see a plausible table, and move on — never noticing the `ERROR` two steps up that means the
+  table is stale, or the `NOTE: ... 196 observations` that means four rows vanished. SAS does not stop the whole
+  program on an error; it often keeps running, so a clean-looking screen can sit on top of a broken step. **Read
+  the log first, the output second**, and always find the "observations read / dataset created" lines.
+- *Assuming a tidy listing means it ran correctly.* A nicely formatted table is not evidence of a correct — or
+  any — run. On *this* site that is literally true: nothing is executed, and every log and table is
+  hand-authored and synthetic. In your own work it is true in spirit: a rendered result you have not verified
+  against the log and a deliberate check is a result on trust alone. The fix is the same habit every week
+  enforces — state *what the log should say*, then run a *verification check* (a row count, a type, an `NMISS`)
+  and confirm it.
+
+The quieter third slip, which we plant now to harvest in the statistics weeks: **calling a difference a
+finding.** This study is synthetic and observational. Even when a later week shows two groups differing, that is
+an **association, not a cause**, and "statistically significant" will not mean "practically important." Naming
+that early keeps the whole term honest.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission, no key.
+
+1. In your own words, finish the sentence: "SAS is for ______, not just for ______." Then name the five stages
+   of the analytics workflow in order.
+2. Given a short SAS program, point to the **DATA step** and the **PROC step**, and say which one *builds* data
+   and which one *reports* it.
+3. A log shows `NOTE: The data set WORK.PARTICIPANTS_RAW has 210 observations and 8 variables.` You expected the
+   cleaned file's 200. Is 210 wrong here? Explain using the raw-versus-cleaned distinction from this week.
+4. Match each message type to what it means and how worried you should be: `NOTE`, `WARNING`, `ERROR`. Which one
+   can sit silently above a plausible-looking table?
+5. A classmate says, "the table rendered, so the code is correct." Give the two-part rebuttal this week teaches
+   (log first; verify against an expected count), and add why it is *doubly* true on this site.
+6. Explain to a non-statistician why "I clicked around in a spreadsheet" fails the course's recurring test —
+   *would someone else be able to understand, rerun, and verify this?* — and how a logged SAS program passes it.
+
+## Reading and source pointer
+
+For this week's orientation and the first log read, the primary reading pointer is the **SAS documentation**:
+the **SAS programming overview** (how a SAS program is organized into the DATA step that builds data and the
+PROC step that analyzes it), the page on **the SAS log** (the meaning of `NOTE`, `WARNING`, and `ERROR`
+messages and the counts they report), and **PROC PRINT** (a first look at a dataset). Read these as a *map* of
+where things are, in the course's own words — "learning to check the documentation" is itself a course skill.
+For the background idea of **what data analytics is** and the standing caution that **observational data are
+not causal**, see **Introduction to Modern Statistics (IMS), Ch. 1** (Çetinkaya-Rundel & Hardin, CC BY-SA 3.0,
+free at openintro-ims.netlify.app).
+
+These notes are the course's own synthesis: grounded in the SAS documentation and open statistics references,
+but not copied from them. SAS® and all SAS Institute product names are the property of SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every number on this page are **hand-authored,
+synthetic, and were NOT run** — SAS is proprietary and is not executed in this build environment. The course
+**SAS execution/output gate is BLOCKED**: a rendered, syntax-highlighted code block or a typed listing is **not
+evidence** that the code runs or that the numbers are right. The load-bearing values this week are the **210
+raw participant rows** (→ **200** unique after cleaning, by removing **8** duplicate-`participant_id` rows and
+**2** test rows) with **8 variables**, the synthetic quality issues (the `age = 199` typo, **12** blank `sex`,
+the character `enroll_date "08/24/2026"`, **2** `baseline_bmi = 0`), and the transfer example's **8,760**
+hourly readings — all synthetic, seed `call streaminit(20260824)`, and drafted "as if run." The wellness-program
+study is **not real health data** and any later analysis of it is **observational**. Do not treat any value here
+as a confirmed reference until the human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week we stop describing the workflow and start *building* it: you open SAS Studio, point a **`libname`** at
+a folder so SAS can find your data, write and submit your first real program, and — the throughline continues —
+**read its log and output** to confirm what it did. Week 2 turns this week's "read the log" habit into a working
+setup: a project folder, a library, a first program that runs top to bottom, and the first deliberate
+verification check on data you loaded yourself.
+
+## See also
+
+- Next week: [Week 2 — SAS environment and project setup](week-02-sas-environment-and-project-setup.qmd) —
+  opening SAS Studio, a `libname`, and your first program, log, and output.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — the library / dataset / DATA step / PROC /
+  log vocabulary collected in one place.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading `NOTE` / `WARNING` /
+  `ERROR` and the row-count and type checks the course uses after every step.
+- [SAS access and project setup](../resources/sas-access-setup.qmd) — how to get into the course-designated SAS
+  environment and organize a project (and where the SAS-access caveat lives).

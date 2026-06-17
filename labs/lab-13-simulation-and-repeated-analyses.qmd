@@ -1,0 +1,417 @@
+---
+title: "Lab 13 — Simulation and repeated analyses"
+subtitle: "Using streaminit to study sampling variability, power, and Type I error"
+page_mode: software_lab_week
+week_contract: software_note_lab
+source_mode: source-informed
+verified: false
+toc: true
+---
+
+> **Purpose.** This lab is the hands-on companion to
+> [Week 13 — Simulation and random generation](../notes/week-13-simulation-and-random-generation.qmd). The
+> notes develop the idea that one sample gives one answer, and that simulation lets you build the *distribution*
+> of answers you would get across many samples. Here you write the SAS that does it: seed the stream with
+> `call streaminit(20260824)`, generate many synthetic datasets of the RiverCity wellness-program study, run the
+> same t-test across all of them, and read **power**, a **Type I rate**, and a **sampling-distribution standard
+> error** off the spread of the results. The numbers you should land on are **locked** in the week note — your
+> job is to make the workflow produce them and to **verify** each step from the log.
+
+::: {.callout-important}
+On this site the SAS code below is **shown as static teaching code** — displayed and
+syntax-highlighted, but **not executed**. Every log line and every output table is **hand-authored and
+synthetic** (the `wellness-program study`, seed `streaminit(20260824)`). A rendered code block is **not**
+evidence the program runs or that the numbers are right. See the
+[Verify](#verify) section and the course's private notation and verification ledger §5.
+:::
+
+## The idea
+
+A single analysis answers a single "what did *this* sample say?" The t-test on the wellness-program arms
+returns one difference and one $p$-value. Simulation answers the harder question the workflow has been circling
+all term — **how much would that answer change across other samples?** — by *building* the variability instead
+of reasoning about it from a formula. You generate many synthetic datasets where you know the truth, run the
+identical analysis on each, and summarize the results. The spread of those results is the sampling
+distribution; the fraction that reject is power (under a real effect) or a Type I rate (under the null). The
+engine is three SAS pieces: the **RAND** function to draw values, **CALL STREAMINIT** to make the draws
+reproducible, and **BY-group processing** to run one analysis across thousands of replicates. The seed is
+load-bearing in a way it never was before — random output you cannot reproduce is output no one can verify, so
+`call streaminit(20260824)` is the line that makes a simulation a *result* rather than an anecdote.
+
+The data are **synthetic; seed set, `streaminit(20260824)`**, and the study is **observational** — the arms are
+not described as randomized, so any arm difference is an **association**, not a causal effect.
+
+## Goal
+
+On the RiverCity wellness-program design — two arms, $n = 99$ per arm, locked arm means `coaching` $125.9$ vs
+`usual_care` $130.8$ (difference $\Delta \approx -4.9$), pooled SD $\approx 12$ — you will:
+
+- generate **one** reproducible synthetic sample with `RAND` + `call streaminit(20260824)` and confirm its row
+  count from the log;
+- stack **10,000 replicates** of the two-arm design, run `PROC TTEST ... by rep;`, capture the per-replicate
+  result with `ODS OUTPUT`, and confirm the replicate counts ($1{,}980{,}000$ generated rows; $20{,}000$
+  captured test rows);
+- summarize across replicates to read **empirical power $\approx 0.99$** and an **empirical Type I rate
+  $\approx 0.05$**, and — from a separate **594-reading whole-cohort** generation (`rand("Normal", 128.4,
+  14.2)`) — the **sampling-distribution SE $\approx 0.58$** for the mean `systolic_bp` ($14.2 / \sqrt{594}$);
+- build a **bootstrap** mean with `PROC SURVEYSELECT` (`method=urs`, `seed=20260824`) as a transfer move.
+
+Every step ends with a **CHECK** — what the log should say and the count you confirm — because a simulation you
+cannot rerun and recount is a simulation no one else can trust.
+
+## Setup
+
+Open the course-designated SAS environment (SAS Studio via SAS OnDemand for Academics, or your university's SAS)
+and a fresh program. Assign a working library and set the options you rely on, so the program runs top to bottom
+with no point-and-click. The "baseline slice" referenced later is the visit-1, one-row-per-participant
+extract ($n = 198$ screened) used for the bootstrap; the simulations generate their own data and need no input
+table.
+
+```sas
+options validvarname=v7 nodate nonumber;
+libname wellness "/home/u_youruser/wellness";   /* permanent project library */
+
+/* The simulations below GENERATE data, so no import is needed here.          */
+/* The bootstrap step uses the visit-1 baseline slice work.baseline (n = 198).*/
+```
+
+::: {.callout-note}
+**Seed convention.** Every random step in this lab begins with `call streaminit(20260824)` (DATA step) or
+`seed=20260824` (PROC SURVEYSELECT) — the locked course seed (the Aug 24 2026 class start date). Same seed,
+same numbers, every run. That is what lets your output match the locked values below and lets a reader confirm
+your work.
+:::
+
+## Steps
+
+### Step 1 — generate one reproducible sample (RAND + CALL STREAMINIT)
+
+Before simulating thousands of datasets, build **one** and prove it is reproducible. The DATA step draws
+`systolic_bp` for two arms with `rand("Normal", mu, 12)` — `coaching` centered at $125.9$, `usual_care` at
+$130.8$. The order is the whole point: **seed first, then draw.** Put `call streaminit` *after* the first
+`rand(...)` and the run is no longer reproducible.
+
+```sas
+data work.one_sample;
+    call streaminit(20260824);          /* seed FIRST -- before any rand() */
+    n_per_arm = 99;
+    do arm_n = 1 to 2;
+        length arm $10;
+        if arm_n = 1 then do; arm = "coaching";   mu = 125.9; end;
+        else               do; arm = "usual_care"; mu = 130.8; end;
+        do i = 1 to n_per_arm;
+            systolic_bp = rand("Normal", mu, 12);   /* pooled SD ~ 12 */
+            output;
+        end;
+    end;
+    drop i mu arm_n n_per_arm;
+run;
+
+proc freq data=work.one_sample; tables arm; run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: The data set WORK.ONE_SAMPLE has 198 observations and 2 variables.
+NOTE: DATA statement used (Total process time):
+      real time           0.02 seconds
+NOTE: There were 198 observations read from the data set WORK.ONE_SAMPLE.
+NOTE: PROCEDURE FREQ used (Total process time):
+      real time           0.03 seconds
+```
+
+```text
+Output (synthetic, not executed)
+
+           The FREQ Procedure
+ arm          Frequency     Percent
+ coaching           99       50.00
+ usual_care         99       50.00
+```
+
+**CHECK.** The load-bearing log line is `198 observations` — two arms of $99$ is $2 \times 99 = 198$, exactly
+what the nested loops asked for, and PROC FREQ confirms the **99/99** split, so the generation did what you
+intended. Read the count off the log against the arithmetic, then confirm the group sizes with FREQ. There is no
+WARNING and no ERROR, so the loop and the `rand` calls parsed. Because `call streaminit(20260824)` ran *before*
+the first `rand(...)`, this dataset is byte-for-byte reproducible — run it tomorrow on another machine and you
+get the same 198 numbers. **Workflow move:** generate a controlled sample, then verify its shape from the log
+before you build anything on it.
+
+### Step 2 — stack 10,000 replicates and run one t-test per replicate
+
+One sample is an anecdote; a simulation needs **many**. Wrap the generation in an outer `do rep = 1 to 10000;`
+loop so every row carries a `rep` index, sort by `rep`, then run `PROC TTEST ... by rep;` so the analysis runs
+**once per replicate**. Capture the per-replicate test row with `ODS OUTPUT`, and close the listing first so SAS
+does not print 10,000 tables. (`by rep;` requires a prior `proc sort ... by rep;`, as always.)
+
+```sas
+data work.sim;
+    call streaminit(20260824);
+    do rep = 1 to 10000;
+        do arm_n = 1 to 2;
+            length arm $10;
+            if arm_n = 1 then do; arm = "coaching";   mu = 125.9; end;
+            else               do; arm = "usual_care"; mu = 130.8; end;
+            do i = 1 to 99;
+                systolic_bp = rand("Normal", mu, 12);
+                output;
+            end;
+        end;
+    end;
+    keep rep arm systolic_bp;
+run;
+
+proc sort data=work.sim; by rep; run;
+
+ods listing close;                         /* suppress 10,000 printed tables */
+ods output ttests=work.tt;                 /* capture the test row per rep   */
+proc ttest data=work.sim;
+    by rep;
+    class arm;
+    var systolic_bp;
+run;
+ods output close;
+ods listing;
+```
+
+```text
+SAS log (synthetic)
+NOTE: The data set WORK.SIM has 1980000 observations and 3 variables.
+NOTE: There were 1980000 observations read from the data set WORK.SIM.
+NOTE: The data set WORK.TT has 20000 observations and 9 variables.
+NOTE: PROCEDURE TTEST used (Total process time):
+      real time           6.41 seconds
+```
+
+**CHECK.** Two counts carry the load. First, `WORK.SIM has 1980000 observations` — that is $10{,}000\text{
+reps} \times 198\text{ rows} = 1{,}980{,}000$, so every replicate has the full two-arm sample. Second,
+`WORK.TT has 20000 observations` — PROC TTEST emits **two** rows per BY group (a pooled and a Satterthwaite
+row), and $10{,}000 \times 2 = 20{,}000$, so you got one test per replicate. **Multiply out what you expect and
+confirm the log matches:** if `WORK.SIM` showed $1{,}881{,}000$ rows you would know a replicate was short
+*before* ever reading a result. `ods listing close;` is what keeps SAS from dumping 10,000 t-test tables to the
+screen. No `ERROR: Data set is not sorted`, so the `proc sort ... by rep;` did its job.
+
+### Step 3 — read power, Type I, and the sampling-distribution SE
+
+A simulation is only useful once you **summarize across replicates**. Keep the pooled-variance row (one per
+rep), flag whether each replicate rejected at $0.05$, and average that 0/1 flag — the **mean of a 0/1 variable
+is a proportion**, the same fact from the summaries week now doing real work. Under the real arm effect that
+fraction is **power**; regenerate both arms from the *same* mean ($128.4$, no effect) and it is the **Type I
+rate**. Separately — and this is its own little simulation — generate the locked sampling-distribution model
+from the week note (**594 readings per replicate** drawn `rand("Normal", 128.4, 14.2)`, the whole-cohort
+`systolic_bp`, *not* the two-arm `work.sim` from Step 2) and summarize one mean per replicate to read the
+**standard error** off the spread of those means.
+
+```sas
+/* POWER: keep the pooled row, flag rejection at 0.05, average it */
+data work.power;
+    set work.tt;
+    where variances = "Equal";          /* 1 pooled row per rep      */
+    reject = (probt < 0.05);            /* 1 if this rep rejected     */
+run;
+
+proc means data=work.power n mean;
+    var reject;                          /* mean of 0/1 = power        */
+run;
+
+/* SAMPLING DISTRIBUTION of mean systolic_bp: the locked-note model.   */
+/* 594 whole-cohort readings per rep, centered 128.4 with raw SD 14.2. */
+/* This is its OWN generation -- NOT a re-summary of two-arm work.sim. */
+data work.sampdist;
+    call streaminit(20260824);
+    do rep = 1 to 10000;
+        do i = 1 to 594;
+            systolic_bp = rand("Normal", 128.4, 14.2);   /* raw SD 14.2 */
+            output;
+        end;
+    end;
+    keep rep systolic_bp;
+run;
+
+proc means data=work.sampdist noprint;
+    by rep;
+    var systolic_bp;
+    output out=work.rep_means mean=mean_bp;   /* one mean per replicate */
+run;
+
+proc means data=work.rep_means n mean std;
+    var mean_bp;                         /* Std of the means = SE      */
+run;
+```
+
+```text
+SAS log (synthetic) -- the sampling-distribution generation
+NOTE: The data set WORK.SAMPDIST has 5940000 observations and 2 variables.
+NOTE: The data set WORK.REP_MEANS has 10000 observations and 4 variables.
+```
+
+```text
+Output (synthetic, not executed)
+
+  POWER simulation (arms at 125.9 vs 130.8, n = 99/arm):
+           The MEANS Procedure
+  Analysis Variable : reject
+           N            Mean
+       10000          0.9900     <- empirical POWER under the arm effect
+
+  TYPE I simulation (rerun with BOTH arms at 128.4, no true difference):
+           N            Mean
+       10000          0.0500     <- empirical TYPE I rate
+
+  SAMPLING DISTRIBUTION of mean systolic_bp (one mean per rep, 594 readings each):
+       N        Mean       Std Dev
+   10000     128.4000      0.5800   <- Std Dev of the means = standard ERROR
+```
+
+**CHECK.** Five moves. (1) `N = 10000` in the power table confirms the `where variances = "Equal"` kept exactly
+one pooled row per replicate, so the $0.05$ threshold is applied once per simulated study — not twice. (2) The
+power `Mean = 0.9900` is the fraction of the $10{,}000$ studies that rejected. (3) The Type I rerun (both arms
+at $128.4$) lands at `0.0500`. (4) `WORK.SAMPDIST has 5940000 observations` multiplies out as $10{,}000\text{
+reps} \times 594\text{ readings} = 5{,}940{,}000$, and `WORK.REP_MEANS has 10000 observations` is one mean per
+replicate — so the spread you summarize is built from the locked $594$-reading whole-cohort model, not the
+two-arm `work.sim`. (5) The sampling-distribution `Std Dev = 0.5800` is then exactly $14.2 / \sqrt{594} \approx
+0.58$: it is the **standard error of the mean** — *not* the raw `systolic_bp` SD of $14.2$; reading $14.2$ here
+is the week's central trap. **Workflow move:** *simulate where you know the truth, then check the procedure
+recovers it.*
+
+### Step 4 — transfer: a bootstrap mean with PROC SURVEYSELECT
+
+The simulations above *generated* data from assumed means. The **bootstrap** instead resamples data you
+**already observed**, with replacement, to approximate a statistic's sampling distribution without a formula.
+PROC SURVEYSELECT does the resampling: `method=urs` draws with replacement, `samprate=1` makes each resample the
+same size as the data ($n = 198$), `reps=2000` sets the count, and `seed=20260824` keeps it reproducible. This
+is a **different variable** in a **new context**, so the endpoints are a *notional transfer illustration*, not
+locked study figures — the only locked anchor is that the mean `steps_k` is $7.45$.
+
+```sas
+proc surveyselect data=work.baseline out=work.boot
+                  method=urs samprate=1 reps=2000
+                  seed=20260824 outhits;
+    /* URS = unrestricted random sampling (with replacement) */
+run;
+
+proc means data=work.boot noprint;
+    by replicate;
+    var steps_k;
+    output out=work.boot_means mean=mean_steps;
+run;
+
+proc univariate data=work.boot_means noprint;
+    var mean_steps;
+    output out=work.boot_ci pctlpts=2.5 97.5 pctlpre=ci_;
+run;
+
+proc print data=work.boot_ci; run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: The data set WORK.BOOT has 396000 observations and 4 variables.
+NOTE: The data set WORK.BOOT_MEANS has 2000 observations and 4 variables.
+```
+
+```text
+Output (synthetic, not executed)  -- notional transfer figures, not locked
+
+  Bootstrap distribution of mean steps_k (2,000 resamples):
+       Mean of means        SE (Std Dev of means)
+            7.4500                   0.1080
+
+  95% percentile bootstrap CI for mean steps_k:
+        ci_2_5      ci_97_5
+        7.2400       7.6600
+```
+
+**CHECK.** `WORK.BOOT has 396000 observations` is $198\text{ rows} \times 2{,}000\text{ reps} = 396{,}000$, so
+each bootstrap resample is the full $n = 198$ — that is what `samprate=1` with `outhits` is for.
+`WORK.BOOT_MEANS has 2000 observations` is **one mean per replicate**. The bootstrap **mean of means** prints as
+$7.45$ — the locked overall `steps_k` mean — a sanity anchor that the right column was resampled. The
+`seed=20260824` makes the whole bootstrap reproducible. (The SE $0.108$ and the endpoints $7.24$ to $7.66$ are
+the notional, non-locked numbers; they carry the same `verified: false` caveat.) **Workflow move:** same
+shape as the simulation — set the seed, fix the resample count and size, summarize one statistic per replicate,
+check the counts off the log, then read the spread as uncertainty — with a different engine (resampling, not
+generating).
+
+## Verify
+
+This lab is correct when its synthetic results **match the companion**
+[Week 13 note](../notes/week-13-simulation-and-random-generation.qmd) exactly — the lab is the hands-on path to
+the note's locked numbers. Confirm each:
+
+- **Seed before draw.** `call streaminit(20260824)` (and `seed=20260824` in SURVEYSELECT) runs before any
+  random value, so all four steps are reproducible. If you move the seed after the first `rand(...)`, every run
+  differs and nothing is verifiable.
+- **Replicate counts multiply out.** `WORK.SIM` = $10{,}000 \times 198 = 1{,}980{,}000$ rows; `WORK.TT` =
+  $10{,}000 \times 2 = 20{,}000$ rows (pooled + Satterthwaite per rep); `WORK.SAMPDIST` = $10{,}000 \times 594 =
+  5{,}940{,}000$ rows (the whole-cohort sampling-distribution model); `WORK.BOOT` = $198 \times 2{,}000 =
+  396{,}000$ rows. Each summary reports `N = 10000` (or `2000`), one result per replicate. A count that does not
+  multiply out means a replicate was short — fix it *before* summarizing.
+- **Power and Type I match the note.** Empirical **power $\approx 0.99$** under the arm effect ($\Delta \approx
+  -4.9$, $n = 99$/arm, pooled SD $\approx 12$); empirical **Type I rate $\approx 0.05$** under the null (both
+  arms at $128.4$). If your power is far from $0.99$, you likely lost the `where variances = "Equal"` row filter
+  or set the wrong means.
+- **SE is read from the means, not the raw SD.** The sampling-distribution `Std Dev` $\approx 0.58$ is the
+  **standard error of the mean** `systolic_bp`, centered $\approx 128.4$ — generated from the $594$-reading
+  whole-cohort model, so it lands at $14.2 / \sqrt{594} \approx 0.58$, an order of magnitude tighter than the
+  raw `systolic_bp` SD of $14.2$. Reading $14.2$ here is the week's classic error.
+- **Bootstrap anchor.** The bootstrap **mean of means** prints as the locked `steps_k` mean $7.45$; the
+  endpoints ($\approx 7.24$ to $7.66$) and SE ($\approx 0.108$) are notional, not locked.
+- **No unexpected log lines.** No `ERROR: Data set is not sorted` (you sorted by `rep`), no
+  `WARNING: ... repeats of BY values` (you used PROC SQL/sorted keys elsewhere in the workflow), and the
+  `ods listing close;` kept the 10,000 tables off the screen.
+
+If all of these hold, the numbers are trustworthy **as a simulation** — separate from the truth of the
+underlying study, which is **synthetic and observational**. Even a 99%-powered detection of the arm difference
+is an **association**, not evidence that coaching *causes* lower blood pressure, and an odds ratio elsewhere in
+the course is not a risk ratio.
+
+## AI use note
+
+If you use an AI assistant on this lab, record its use and — the load-bearing line — **how you verified its
+output yourself**. An assistant can write a `do rep` loop or an `ods output` statement, but you confirm the
+replicate count off the log and that power lands at the locked $0.99$.
+
+| Tool | Purpose | Verification |
+|------|---------|--------------|
+| (which assistant, with approx. date/version) | drafting the `do rep = 1 to 10000;` simulation loop | confirmed `WORK.SIM` log count $= 10{,}000 \times 198 = 1{,}980{,}000$ |
+| (same) | explaining `ods output ttests=` and the pooled vs Satterthwaite rows | confirmed `WORK.TT` has $20{,}000$ rows and kept only `variances = "Equal"` |
+| (same) | debugging the SURVEYSELECT bootstrap (`method=urs`, `outhits`) | confirmed `WORK.BOOT` $= 198 \times 2000$ and the mean of means $= 7.45$ |
+
+Verification is the habit the course is built on: a rendered code block proves nothing; the log count, the
+replicate structure, and the match to the locked $0.99$ / $0.05$ / $0.58$ are what make the result yours.
+
+## See also
+
+- Companion note: [Week 13 — Simulation and random generation](../notes/week-13-simulation-and-random-generation.qmd)
+  — RAND, CALL STREAMINIT, SURVEYSELECT, power, Type I, and the sampling-distribution SE.
+- Previous week: [Week 12 — Reshaping and merging data](../notes/week-12-reshaping-and-merging.qmd) — TRANSPOSE
+  and MERGE, and validating the 594-row join the simulations build on.
+- Next week: [Week 14 — Reproducible SAS analysis report](../notes/week-14-reproducible-sas-analysis-report.qmd)
+  — the whole pipeline (simulation included) as one reproducible program.
+- [PROC reference](../resources/proc-reference.qmd) — SURVEYSELECT, TTEST, MEANS, UNIVARIATE side by side.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR and
+  checking counts, including replicate counts.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — RAND, streaminit, seed, replicate, and the
+  verification vocabulary.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build
+environment, so the course **SAS execution/output gate is BLOCKED**. A rendered, syntax-highlighted code block
+or a typed listing is **not** evidence that the program runs or that the numbers are right. The load-bearing
+values here — the empirical **power $\approx 0.99$**, the empirical **Type I rate $\approx 0.05$**, the
+**sampling-distribution mean $\approx 128.4$ with SE $\approx 0.58$** ($= 14.2 / \sqrt{594}$, from the
+$594$-reading whole-cohort model), the simulation row counts ($10{,}000$
+replicates $\times 198 = 1{,}980{,}000$ rows in `WORK.SIM`; $20{,}000$ rows in the captured t-test output;
+$10{,}000 \times 594 = 5{,}940{,}000$ rows in `WORK.SAMPDIST`; $396{,}000$ rows in the $2{,}000$-replicate
+bootstrap), the locked arm means ($125.9$ vs $130.8$, $\Delta
+\approx -4.9$, pooled SD $\approx 12$), and the transfer bootstrap figures for `steps_k` (notional, not locked,
+around the locked mean $7.45$) — are drafted "as if run" and are synthetic (the `wellness-program study`, seed
+`streaminit(20260824)` / `seed=20260824`), representing no real health data, with the analysis **observational**
+(any arm difference is an association, not a causal effect). Do not treat any value here as a confirmed reference
+until the human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+*The graded deliverable, its rubric, and due date live in Blackboard (the LMS) — this page is study and practice
+only. All numbers are synthetic and `verified: false`; the SAS execution/output gate is blocked pending
+sign-off.*

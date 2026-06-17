@@ -1,0 +1,462 @@
+---
+title: "Week 10 — Linear regression"
+subtitle: "Fitting, diagnosing, and interpreting a linear model in SAS"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC REG (MODEL statement, fit statistics, ODS GRAPHICS diagnostics) — supports fitting and reading a linear model"
+  - "SAS documentation — PROC GLM (continuous + classification predictors) — supports the regression/ANOVA bridge"
+  - "Introduction to Modern Statistics (IMS), 2nd ed. — linear regression chapter — calibrates the statistical background (slopes, R-squared, residuals)"
+toc: true
+---
+
+## The week question
+
+Last week you compared groups: a t-test asked whether two arms differ on average, and ANOVA asked whether
+three sites differ. Both put a categorical predictor on one side and a continuous outcome on the other. This
+week the predictor goes **continuous**, and the question sharpens: **how does the outcome change as a numeric
+input changes, and how well does a straight-line model capture that?** Concretely — does baseline systolic
+blood pressure move with a participant's `age` and `baseline_bmi`, by how much per unit, and is the line a
+trustworthy summary of the cloud of points? The SAS tool for that question is **PROC REG**. The workflow this
+week is not "run REG and read the slope." It is fit the model, **read the log**, confirm the row count and the
+variable types went in as numbers, read the slopes and the fit statistics, and then — the part beginners skip
+— **check the residuals** before you believe any of it. A modest $R^2$ that you understood beats a big number
+you did not earn.
+
+## Why this matters
+
+Regression is the workhorse of applied analytics, and PROC REG is where the course's discipline pays off most
+visibly. It matters here for four reasons. First, a regression *quantifies a relationship*: the slope is a
+number with units ("each additional point of BMI is associated with about 1 mm Hg of systolic pressure"),
+which is far more useful than "they're related." Second, regression is the first procedure where the **output
+is large** — an ANOVA table, a parameter-estimates table, fit statistics, and a diagnostics panel all at once
+— so you practice selecting the pieces that answer the question and ignoring the rest. Third, it is the first
+place where **a good-looking fit can be a bad model**: $R^2$ rises mechanically as you add predictors, and a
+line can fit numerically while the residuals scream that a linearity or constant-variance assumption is
+broken. Reading the diagnostics, not just the $R^2$, is the skill. Fourth, the wellness-program data are
+**observational**, so every coefficient this week is an **association**, never a cause — `age` and
+`baseline_bmi` were not assigned, so the slopes describe how blood pressure *co-varies* with them, not what
+would happen if you changed them. Saying that out loud is part of the analysis, not a footnote.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Fit a simple and a multiple linear regression in SAS with `PROC REG; model y = x1 x2; run;`, and say what
+  the `MODEL` statement names as the response and the predictors.
+- Read the **parameter-estimates table**: the intercept, each slope, its standard error, its $t$ value, and
+  its $p$-value, and state each slope's meaning in units, holding the other predictors fixed.
+- Read the **fit statistics** — $R^2$ (here $0.214$), Root MSE (here $12.6$), and the overall $F$ test — and
+  explain what each does and does **not** tell you.
+- Turn on `ODS GRAPHICS` and read the **diagnostics panel** (residual-vs-predicted, normal QQ) to check
+  linearity, constant variance, and approximate normality — *before* trusting the fit.
+- Run the **verification moves** for a model: confirm the input row count (n = 198 on the visit-1 slice),
+  confirm the predictors are numeric, and check `NMISS` so you know how many rows the fit actually used.
+- State, every time, that the wellness-program data are **synthetic and observational**, so a slope is an
+  **association**, not a causal effect, and a modest $R^2$ means the model explains only part of the spread.
+
+## Core vocabulary
+
+The week's SAS and statistics terms, defined plainly. The statistics ideas are calibrated against the IMS
+regression chapter; the SAS terms are the course's own usage.
+
+- **PROC REG** — SAS's primary linear-regression procedure. It fits ordinary-least-squares models, reports
+  parameter estimates and fit statistics, and (with `ODS GRAPHICS ON`) emits a diagnostics panel.
+- **`MODEL` statement** — `model y = x1 x2;` names the **response** (left of `=`) and the **predictors** (right
+  of `=`). REG requires the predictors to be **numeric**; a character predictor needs PROC GLM or a coded
+  variable instead.
+- **Intercept** — the model's predicted response when every predictor is $0$. Often not literally meaningful
+  (no one has `age` $= 0$), but it anchors the line.
+- **Slope (parameter estimate)** — the change in the predicted response per one-unit change in that predictor,
+  **holding the other predictors fixed**. The units are "response units per predictor unit."
+- **$R^2$ (R-square)** — the fraction of the response's variance the model explains, between $0$ and $1$. Here
+  $R^2 = 0.214$: the model explains about $21\%$ of the spread in systolic blood pressure.
+- **Root MSE (RMSE)** — the typical size of a residual, in the response's units. Here RMSE $= 12.6$ mm Hg, so
+  predictions are off by roughly that much on average.
+- **Residual** — observed minus predicted, $e_i = y_i - \hat y_i$. The residuals are what you *diagnose*: a
+  good linear model leaves them patternless around zero with roughly constant spread.
+- **Diagnostics panel** — the ODS graphic PROC REG produces: residual-vs-predicted, a normal QQ plot, and
+  more. It is how you *check* the model rather than trust the fit number.
+- **Associational, not causal** — because the predictors were observed, not assigned, a slope describes
+  co-variation in this synthetic sample, not the effect of intervening on a predictor.
+
+## Concept development
+
+### Fitting the line: PROC REG and the MODEL statement
+
+A linear regression in SAS is two statements. You name the procedure and the dataset, then write a `MODEL`
+statement with the response on the left of the equals sign and the predictors on the right. The model fit is
+ordinary least squares:
+
+$$
+\widehat{\text{systolic\_bp}} = b_0 + b_1\,\text{age} + b_2\,\text{baseline\_bmi}.
+$$
+
+The SAS for the fit on the visit-1 baseline slice (one row per participant, n = 198) is below. Note `ODS
+GRAPHICS ON;` — that single line is what turns on the diagnostics panel you will read in a moment. The data are
+**synthetic; seed set, `streaminit(20260824)`**.
+
+```sas
+ods graphics on;
+
+proc reg data=work.baseline plots=(residualbypredicted qqplot);
+    model systolic_bp = age baseline_bmi;
+run;
+quit;
+
+ods graphics off;
+```
+
+```text
+SAS log (synthetic)
+NOTE: PROCEDURE REG used (Total process time):
+      real time           0.31 seconds
+NOTE: There were 198 observations read from the data set WORK.BASELINE.
+NOTE: 198 observations were used in the analysis.
+NOTE: The above message was for the following BY group ...
+NOTE: ODS Graphics output written to the HTML destination.
+```
+
+**What the log should say, and what to CHECK.** The load-bearing line is `198 observations read` and `198
+observations were used` — the two should **match**. If "used" were smaller than "read," a predictor had
+missing values and REG silently dropped those rows (REG uses only complete cases). So the verification move is:
+read both numbers and confirm `198 = 198`, then know that the fit used all 198 baseline participants and none
+were dropped for missingness. No WARNING and no ERROR appear, so the model statement parsed and ran.
+
+### Reading the output: estimates and fit statistics
+
+PROC REG prints an analysis-of-variance table, then a parameter-estimates table, then fit statistics. The
+estimates are the heart of it:
+
+```text
+Output (synthetic, not executed)
+
+                          Analysis of Variance
+                                Sum of           Mean
+Source             DF         Squares         Square    F Value    Pr > F
+Model               2         8512.4         4256.2      26.51     <.0001
+Error             195        31309.6          160.6
+Corrected Total   197        39822.0
+
+Root MSE           12.6        R-Square     0.2140
+Dependent Mean    128.4        Adj R-Sq     0.2060
+
+                     Parameter Estimates
+                  Parameter    Standard
+Variable     DF    Estimate       Error   t Value   Pr > |t|
+Intercept     1     86.500       7.812     11.07     <.0001
+age           1      0.450       0.118      3.81      0.0002
+baseline_bmi  1      1.020       0.214      4.77     <.0001
+```
+
+**Interpretation, with the workflow move named.** Read the parameter estimates first: the **intercept** is
+$86.5$, the **`age` slope** is $0.45$, and the **`baseline_bmi` slope** is $1.02$. Each slope holds the other
+predictor fixed, so each additional year of age is associated with about $0.45$ mm Hg higher systolic pressure,
+and each additional BMI point with about $1.02$ mm Hg higher, on average, in this synthetic sample. Both
+slopes are positive and both have small $p$-values ($0.0002$ and $<.0001$), so both predictors carry signal
+here. The **fit statistics** then temper the story: $R^2 = 0.214$ means the model explains only about $21\%$
+of the variability in systolic pressure, and Root MSE $= 12.6$ means a typical prediction is off by about
+$12.6$ mm Hg. The workflow move is *read the estimates for direction and size, then read $R^2$/RMSE for how
+much is left unexplained* — and here a lot is left unexplained, which is the honest result, not a failure.
+
+### Checking the model: residual diagnostics before you trust the fit
+
+A regression can return clean-looking numbers while violating its own assumptions, so the diagnostics panel is
+not optional. Ordinary least squares assumes the relationship is roughly **linear**, the residuals have
+roughly **constant spread** (homoscedastic), and they are approximately **normal**. The `plots=` option (or
+`ODS GRAPHICS ON;` with the default panel) draws the two plots that check this: residual-vs-predicted and a
+normal QQ plot.
+
+```sas
+ods graphics on;
+
+proc reg data=work.baseline
+         plots(only)=(residualbypredicted qqplot);
+    model systolic_bp = age baseline_bmi;
+    output out=work.reg_diag predicted=yhat residual=resid;
+run;
+quit;
+
+ods graphics off;
+
+/* numeric backstop for the visual: summarize the residuals */
+proc means data=work.reg_diag n nmiss mean std min max;
+    var resid;
+run;
+```
+
+```text
+Output (synthetic, not executed)
+
+           The MEANS Procedure
+Analysis Variable : resid Residual
+  N    NMiss      Mean     Std Dev    Minimum    Maximum
+198        0    0.0000     12.5680   -31.4000    33.8000
+```
+
+Here SAS is **not run**, so no panel image is emitted; the description here stands in for it (the
+visual plan calls this the fallback). The synthetic diagnostics would show a **residual-vs-predicted scatter
+with no strong funnel or curve** — points spread fairly evenly above and below the zero line — and a **normal
+QQ plot with points close to the straight reference line**. **What to CHECK and what it means.** The residual
+mean is $0.0000$, which is mechanical for least squares (it always is) and so confirms the fit math, not the
+assumptions. The diagnostics you actually trust come from the *shapes*: a patternless cloud supports
+linearity and constant variance; a near-straight QQ plot supports approximate normality. The numeric backstop
+shows `NMISS = 0` and `N = 198`, so every modeled row has a residual — a small verification that the `output`
+dataset lines up with the fit. The discipline: never report $R^2$ without having looked at the residuals.
+
+### The REG/GLM bridge: when a predictor is categorical
+
+PROC REG needs **numeric** predictors. If you wanted to add `site` (character, three levels) or `arm`
+(character, two levels) to the model, REG would error, because it cannot read a character variable as a slope.
+That is what PROC GLM is for: GLM accepts a `CLASS` statement that codes a categorical predictor into the
+model. The bridge is worth naming because last week's ANOVA (`systolic_bp` by `site`) and this week's
+regression are the **same linear model** seen from two angles — GLM unifies them.
+
+```sas
+proc glm data=work.baseline;
+    class site;
+    model systolic_bp = age baseline_bmi site;
+run;
+quit;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 198 observations read from the data set WORK.BASELINE.
+NOTE: PROCEDURE GLM used (Total process time):
+      real time           0.28 seconds
+```
+
+**What to CHECK.** The same `198 observations read` line is the row-count check. The teaching point is the
+**type rule**: had you written `proc reg ... model systolic_bp = age baseline_bmi site;` with `site`
+character, the log would have shown `ERROR: Variable site in list does not match type prescribed for this
+list.` Knowing *which* procedure accepts *which* type — REG numeric-only, GLM with a `CLASS` statement for
+categoricals — is the workflow knowledge that keeps you from fighting the log. We keep the recurring REG
+example numeric (`age`, `baseline_bmi`) precisely so it runs in REG; GLM is the door to categorical predictors.
+
+## Worked examples
+
+### Worked example — the wellness-program study: systolic_bp on age and BMI
+
+**The task.** Using the RiverCity wellness-program visit-1 baseline slice (one row per participant, n = 198),
+model baseline `systolic_bp` on `age` and `baseline_bmi`, read the coefficients and fit, and check the
+residuals. The data are **synthetic; seed set, `streaminit(20260824)`**, and **observational** — no one was
+randomized to an age or a BMI.
+
+**The code.**
+
+```sas
+ods graphics on;
+
+proc reg data=work.baseline
+         plots(only)=(residualbypredicted qqplot);
+    model systolic_bp = age baseline_bmi;
+run;
+quit;
+
+ods graphics off;
+```
+
+**The synthetic output** (the locked parameter estimates and fit statistics):
+
+```text
+Output (synthetic, not executed)
+
+Number of Observations Read         198
+Number of Observations Used         198
+
+                          Analysis of Variance
+                                Sum of           Mean
+Source             DF         Squares         Square    F Value    Pr > F
+Model               2         8512.4         4256.2      26.51     <.0001
+Error             195        31309.6          160.6
+Corrected Total   197        39822.0
+
+Root MSE           12.60000     R-Square     0.2140
+Dependent Mean    128.40000     Adj R-Sq     0.2060
+
+                     Parameter Estimates
+                  Parameter    Standard
+Variable     DF    Estimate       Error   t Value   Pr > |t|
+Intercept     1    86.50000     7.81200     11.07     <.0001
+age           1     0.45000     0.11800      3.81     0.0002
+baseline_bmi  1     1.02000     0.21400      4.77     <.0001
+```
+
+**The verification check.** Three moves. (1) `Number of Observations Read = 198` and `Used = 198` **match**,
+so no rows were dropped for missing predictors — the fit used the full baseline slice. (2) The predictors are
+**numeric** (`age`, `baseline_bmi`), which is why REG accepted them; a quick `proc contents` would confirm the
+types before the fit. (3) An `NMISS` check on the response and predictors (as in the diagnostics block above)
+returns $0$, confirming complete cases. With those passing, the numbers are trustworthy *as a fit* — separate
+from whether the model is *adequate*, which the residuals decide.
+
+**The interpretation.** The fitted line is
+$\widehat{\text{systolic\_bp}} = 86.5 + 0.45\,\text{age} + 1.02\,\text{baseline\_bmi}$. Each additional year
+of age is associated with about $0.45$ mm Hg higher systolic pressure, and each additional BMI point with
+about $1.02$ mm Hg higher, **holding the other fixed**, in this synthetic sample. Both slopes are
+"significant" ($p = 0.0002$, $p < .0001$), and the overall model is too ($F = 26.51$, $p < .0001$). But
+$R^2 = 0.214$ says the model explains only about $21\%$ of the variation, and RMSE $= 12.6$ mm Hg says
+individual predictions are still off by a lot — so this is a real but *modest* relationship, not a strong
+predictor of any one person's pressure. The residual diagnostics (patternless cloud, near-straight QQ) support
+the linear form. And because age and BMI were **observed, not assigned**, these are **associations**: the
+analysis does not show that aging or gaining BMI *causes* higher pressure, only that they co-vary with it here.
+
+### Worked example — transfer: steps_k on age in a new model
+
+**The task.** A new question in a new context, still synthetic and still the wellness program: does physical
+activity, measured as `steps_k` (thousands of steps per day), change with `age`? Fit a **simple** linear
+regression of `steps_k` on `age` over the same baseline slice. This is a different response and a single
+predictor, so the numbers below are a **notional transfer illustration**, not the locked study figures — they
+are invented for this example and carry the same `verified: false` caveat.
+
+**The code.**
+
+```sas
+ods graphics on;
+
+proc reg data=work.baseline plots(only)=(fitplot residualbypredicted);
+    model steps_k = age;
+run;
+quit;
+
+ods graphics off;
+```
+
+```text
+SAS log (synthetic)
+NOTE: There were 198 observations read from the data set WORK.BASELINE.
+NOTE: 198 observations were used in the analysis.
+```
+
+```text
+Output (synthetic, not executed)  -- notional transfer figures, not locked
+
+Number of Observations Read         198
+Number of Observations Used         198
+
+Root MSE            2.48000     R-Square     0.0890
+Dependent Mean      7.45000     Adj R-Sq     0.0844
+
+                     Parameter Estimates
+                  Parameter    Standard
+Variable     DF    Estimate       Error   t Value   Pr > |t|
+Intercept     1    10.20000     0.62000     16.45     <.0001
+age           1    -0.05500     0.01300     -4.23     <.0001
+```
+
+**The verification check.** `Read = 198` and `Used = 198` match, so no rows dropped; `age` is numeric, so REG
+accepted it; an `NMISS` check on `steps_k` and `age` would confirm complete cases. The `Dependent Mean` prints
+as $7.45$, which is the locked overall `steps_k` mean from the study — a quick sanity anchor that the right
+column went into the model. (The slope and $R^2$ here are the notional, non-locked numbers.)
+
+**The interpretation.** The fitted line $\widehat{\text{steps\_k}} = 10.2 - 0.055\,\text{age}$ has a
+**negative** slope: each additional year of age is associated with about $0.055$ thousand fewer steps per day
+(about $55$ fewer steps), on average, in this synthetic sample. The slope is "significant" ($p < .0001$), but
+$R^2 = 0.089$ means age explains under $10\%$ of the variation in steps — even less than the blood-pressure
+model. The transfer lesson is the same workflow shape in a new model: name the response and predictor, read
+the row count off the log, read the slope *with its sign and units*, then let the modest $R^2$ keep the claim
+humble. And again: observational, so this is an **association** between age and activity, not evidence that
+aging *reduces* anyone's step count.
+
+## A common mistake
+
+The week's central trap is **reporting $R^2$ and the slopes without checking the residuals** — treating a
+fitted model as a validated model. Four specific slips to avoid:
+
+- *Trusting $R^2$ alone.* A high $R^2$ can hide a curved relationship or a fanning variance, and a modest
+  $R^2$ (like this week's $0.214$) is not a "failed" model — it is an honest one if the residuals are clean.
+  Always look at the residual-vs-predicted plot before you believe the fit number.
+- *Reading the residual mean as a diagnostic.* The residual mean is $0.0000$ for **every** least-squares fit;
+  it confirms the arithmetic, not the assumptions. The *shape* of the residual scatter and QQ plot is what
+  diagnoses linearity, constant variance, and normality.
+- *Forgetting the type rule.* PROC REG predictors must be **numeric**. Putting `site` or `arm` (character)
+  into a `MODEL` statement throws `ERROR: Variable ... does not match type prescribed for this list.` Use PROC
+  GLM with a `CLASS` statement for categorical predictors, or code them numerically first.
+- *Letting "significant" and "observational" slide.* A small $p$-value means the slope is distinguishable from
+  zero, **not** that the effect is large or practically important — read the slope's size and the $R^2$ for
+  that. And because the wellness data are **observational**, every slope is an **association**: the model
+  cannot say that changing `age` or `baseline_bmi` would change blood pressure. State both limits out loud.
+
+A fifth, quieter slip is **not checking the row count the fit actually used**. If a predictor has missing
+values, REG drops those rows silently, and `Observations Used` falls below `Observations Read`. Read both
+lines; if they disagree, you are modeling a smaller, possibly non-representative subset than you thought.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission.
+
+1. Write the PROC REG step that models `systolic_bp` on `age` and `baseline_bmi` with the diagnostics panel
+   turned on. Which line names the response, and which names the predictors?
+2. From the locked output, state in one sentence each what the `age` slope $0.45$, the `baseline_bmi` slope
+   $1.02$, the $R^2 = 0.214$, and the RMSE $= 12.6$ tell you — and what each does **not** tell you.
+3. The log shows `Observations Read = 198` and `Observations Used = 198`. Why do you check that these match,
+   and what would it mean if "Used" were smaller?
+4. A classmate reports "$R^2 = 0.214$ and both slopes are significant, so the model is good." Name two things
+   they should check before concluding the model is adequate, using this week's vocabulary.
+5. You try `proc reg; model systolic_bp = age site;` with `site` character and get an ERROR. Explain why, and
+   name the procedure that *would* accept `site` as a predictor.
+6. The data are observational. Rewrite "higher BMI causes higher blood pressure" as a correct associational
+   claim about the `baseline_bmi` slope, and say in one sentence why the causal version is not supported.
+
+## Reading and source pointer
+
+For the SAS syntax, the reading pointer is the **SAS documentation for PROC REG** — the `MODEL` statement, the
+fit statistics, and the `ODS GRAPHICS` diagnostics panel — and the **SAS documentation for PROC GLM** for the
+`CLASS` statement that extends the model to categorical predictors (the REG/GLM bridge). Consult these on
+[documentation.sas.com](https://documentation.sas.com) for the exact option names and the diagnostics panel;
+read them for *what the options do*, in the course's own words, not to copy their examples or listings. For
+the **statistical background** — what a slope and an intercept mean, how to read $R^2$ and residuals, and why
+observational slopes are associations — see the **linear regression chapter of *Introduction to Modern
+Statistics* (IMS), 2nd ed. (Çetinkaya-Rundel & Hardin), CC BY-SA 3.0**, free at
+[openintro-ims.netlify.app](https://openintro-ims.netlify.app); it calibrates the interpretation level, not
+the SAS syntax. These notes are the course's own synthesis: grounded in the SAS documentation and open
+statistics references, but not copied from them. SAS® and all SAS Institute product names are the property of
+SAS Institute Inc. For the fuller hands-on sequence, work the companion
+[Lab 10 — Linear regression and diagnostics](../labs/lab-10-linear-regression-and-diagnostics.qmd).
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build
+environment. The course **SAS execution/output gate is BLOCKED**: a rendered, syntax-highlighted code block or
+a typed listing is **not** evidence that the program runs or that the numbers are right. The load-bearing
+values here — the fitted model
+$\widehat{\text{systolic\_bp}} = 86.5 + 0.45\,\text{age} + 1.02\,\text{baseline\_bmi}$, the fit statistics
+$R^2 = 0.214$ and RMSE $= 12.6$, the overall $F = 26.51$, the slope $p$-values ($0.0002$ and $<.0001$), the
+n = 198 baseline row count, and the transfer figures for `steps_k` on `age` (which are notional, not locked) —
+are drafted "as if run" for this draft site and are synthetic (the `wellness-program study`, seed
+`streaminit(20260824)`), representing no real health data, with the analysis **observational** (slopes are
+associations, not causal effects). Do not treat any value here as a confirmed reference until the
+human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week the outcome goes **binary**: instead of predicting a continuous blood pressure, you predict whether
+a participant **met their goal** (`goal_met`, 1/0) with **PROC LOGISTIC**. The straight line gives way to a
+model of the *odds*, and you read **odds ratios** instead of slopes — the `arm` (coaching) odds ratio of
+$1.78$ is the recurring number. The course's two warnings carry straight over and get sharper: an **odds ratio
+is not a risk ratio**, and the observational data still make it an **association**, not a causal effect. The
+diagnostics change too — you check a C-statistic (AUC $= 0.69$) instead of residuals.
+
+## See also
+
+- Previous week: [Week 9 — t-tests, ANOVA & group comparisons](week-09-ttests-anova-group-comparisons.qmd) —
+  the categorical-predictor side of the same linear model.
+- Next week: [Week 11 — Logistic regression & categorical outcomes](week-11-logistic-regression-categorical.qmd)
+  — regression when the outcome is binary, and odds ratios.
+- Companion lab: [Lab 10 — Linear regression and diagnostics](../labs/lab-10-linear-regression-and-diagnostics.qmd).
+- [PROC reference](../resources/proc-reference.qmd) — REG, GLM, TTEST, LOGISTIC side by side.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR and
+  checking counts.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, dataset, variable, format, and
+  the verification vocabulary.

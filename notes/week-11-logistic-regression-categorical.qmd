@@ -1,0 +1,444 @@
+---
+title: "Week 11 — Logistic regression and categorical outcomes"
+subtitle: "Modeling a yes/no outcome with odds ratios, read responsibly"
+page_mode: normal_week
+week_contract: public_note
+source_mode: source-informed
+verified: false
+readings:
+  - "SAS documentation — PROC LOGISTIC (MODEL statement, event= option, odds-ratio table) — supports fitting and reading a binary-outcome model"
+  - "SAS documentation — PROC LOGISTIC CLASS statement and reference coding — supports a categorical predictor and its reference level"
+  - "SAS documentation — PROC LOGISTIC ROC / C-statistic output — supports the model's classification summary (AUC)"
+  - "Introduction to Modern Statistics (IMS), 2nd ed. — logistic regression chapter — calibrates the statistical background (log-odds, odds ratios, interpretation)"
+toc: true
+---
+
+## The week question
+
+Last week the outcome was continuous: PROC REG modeled `systolic_bp` as a straight line in `age` and
+`baseline_bmi`, and you read slopes in millimeters of mercury. This week the outcome goes **binary** — a plain
+yes/no — and the straight line no longer fits. The question is: **does a participant meet their step goal
+(`goal_met` = 1) or not (0), and how do the odds of meeting it change with the coaching arm, age, and BMI?**
+You cannot regress a 0/1 column with PROC REG and read a slope in "probability per year"; probabilities are
+bounded between $0$ and $1$, and a line walks straight out of that range. The SAS tool that respects the
+boundary is **PROC LOGISTIC**, which models the **log-odds** of the event and reports **odds ratios**. The
+workflow this week is not "run LOGISTIC and read the OR." It is decide and **declare which level is the
+event**, fit the model, **read the log** and confirm the row count and the event count, read the odds-ratio
+table with its confidence intervals, check the model's classification summary (the C-statistic), and then —
+the part that separates a careful analyst from a careless one — say in plain words what an odds ratio does and
+does **not** mean. An odds ratio is not a risk ratio, and observational data are not causal.
+
+## Why this matters
+
+A great many real analytic questions are yes/no: did the patient readmit, did the customer churn, did the
+loan default, did the participant meet the goal. Logistic regression is the standard tool for all of them, and
+PROC LOGISTIC is where this course's discipline meets its sharpest interpretation trap. It matters here for
+four reasons. First, the outcome type **dictates the procedure**: a binary outcome needs a model on a scale
+that stays inside $[0,1]$, so you learn to match the tool to the variable rather than forcing a line onto a
+0/1 column. Second, the headline number — the **odds ratio** — is genuinely easy to misread, and the single
+most common error in applied work is calling an odds ratio a "risk" or treating $\text{OR} = 1.78$ as "78%
+more likely." Saying the OR correctly is the skill, not running the procedure. Third, LOGISTIC forces an
+explicit **modeling decision** that REG hid: *which* level of the outcome is the "event," and *which* level of
+a categorical predictor is the "reference." Get either wrong and every odds ratio inverts, silently, with no
+error. Fourth, the wellness-program data are **synthetic and observational**, so the arm odds ratio is an
+**association**, not the causal effect of coaching — the arms are not described as randomized. Every one of
+these is a workflow check you do *before* you believe the table.
+
+## Learning goals
+
+By the end of this week you should be able to:
+
+- Recognize when an outcome is **binary** (`goal_met` 0/1) and therefore calls for **PROC LOGISTIC** rather
+  than PROC REG, and say why a line on a 0/1 column is the wrong model.
+- Write `proc logistic; model goal_met(event='1') = arm age baseline_bmi;` and explain that `event='1'`
+  **declares which level is modeled** — the most load-bearing option of the week.
+- Read the **odds-ratio table**: the point estimate, the 95% confidence interval, and the $p$-value, and state
+  each odds ratio in plain words ("the odds of meeting goal are about $1.78$ times as high for coaching").
+- Read the **C-statistic (AUC $= 0.69$)** as the model's rank-ordering / discrimination summary, and say what
+  it does and does **not** tell you.
+- Run the **verification moves** for a logistic fit: confirm the input row count (n = 198 on the visit-1
+  slice), confirm the outcome is numeric 0/1, check the **event count** the log reports (`goal_met` = 1), and
+  check `NMISS` so you know how many rows the fit used.
+- State, every time, that an **odds ratio is not a risk ratio**, and that the **observational** wellness data
+  make the arm OR an **association**, not a causal effect of coaching.
+
+## Core vocabulary
+
+The week's SAS and statistics terms, defined plainly. The statistics ideas are calibrated against the IMS
+logistic-regression chapter; the SAS terms are the course's own usage.
+
+- **Binary outcome** — a variable with exactly two values, here `goal_met` coded $1$ (met goal) / $0$ (did
+  not). It is stored **numeric**, and the mean of a 0/1 variable is a **proportion** (the overall goal-met
+  rate is $246/594 \approx 0.41$).
+- **PROC LOGISTIC** — SAS's primary procedure for a binary outcome. It models the **log-odds** of the event as
+  a linear function of the predictors and reports odds ratios.
+- **Odds** — for an event with probability $p$, the odds are $p/(1-p)$. Odds of $1$ mean a 50/50 event; odds
+  of $2$ mean the event is twice as likely as not. Odds are **not** the probability.
+- **Log-odds (logit)** — $\operatorname{logit}(p) = \ln\!\big(p/(1-p)\big)$. Logistic regression is linear on
+  *this* scale: $\operatorname{logit}(p) = b_0 + b_1 x_1 + \cdots$, which keeps the fitted $p$ inside $(0,1)$.
+- **`event=` option** — `model y(event='1') = ...` tells SAS **which level of the outcome is the event** being
+  modeled. Omit it and SAS models the *lower* sorted level by default (often the one you did **not** mean),
+  which inverts every odds ratio. Always declare it.
+- **Odds ratio (OR)** — the multiplicative change in the **odds** of the event per one-unit change in a
+  predictor (or, for a categorical predictor, comparing a level to its reference). Here the coaching-arm OR is
+  $1.78$. An **OR is not a risk ratio** — it does not say "$78\%$ more likely."
+- **Reference level** — for a `CLASS` predictor, the level the odds ratio is *compared against* (here
+  `usual_care` is the reference, so the OR describes coaching **relative to** usual care).
+- **C-statistic (AUC)** — the area under the ROC curve, a summary of how well the model **ranks** an event
+  case above a non-event case. Here AUC $= 0.69$. It measures discrimination, not whether the probabilities
+  are calibrated, and not causation.
+
+## Concept development
+
+### Why a binary outcome needs a different model
+
+When the outcome is 0/1, fitting a straight line is the wrong move twice over. A line $\hat p = b_0 + b_1 x$
+can predict $\hat p = 1.4$ or $\hat p = -0.2$ — values that are not probabilities — and its constant-variance
+assumption is violated because a 0/1 outcome's variance depends on $p$. Logistic regression fixes both by
+modeling the **log-odds** as linear:
+
+$$
+\operatorname{logit}(p) = \ln\!\left(\frac{p}{1-p}\right) = b_0 + b_1\,\text{arm} + b_2\,\text{age}
++ b_3\,\text{baseline\_bmi}.
+$$
+
+The logit can be any real number, so the linear predictor is unconstrained, but solving back for $p$ always
+lands inside $(0,1)$. Exponentiating a coefficient turns it into an **odds ratio**: $e^{b}$ is the
+multiplicative change in the odds per one-unit change in that predictor. That is why LOGISTIC reports odds
+ratios, not slopes — the slope lives on the log-odds scale, which is hard to talk about, and its exponential
+lives on the odds scale, which is (with care) interpretable. The recurring outcome `goal_met` is **numeric**
+0/1; that type matters, because a character `"Y"/"N"` outcome would need different handling and would sort
+differently. Confirm the outcome is the numeric 0/1 column before you model it.
+
+### Declaring the event: the `event=` option
+
+The single most consequential keystroke this week is `(event='1')`. Logistic regression models the probability
+of *one* of the two outcome levels, and you must say which. The SAS below models the probability that
+`goal_met = 1` (met goal). The data are **synthetic; seed set, `streaminit(20260824)`**.
+
+```sas
+proc logistic data=work.baseline;
+    class arm (ref='usual_care') / param=ref;
+    model goal_met(event='1') = arm age baseline_bmi;
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: PROC LOGISTIC is modeling the probability that goal_met='1'.
+NOTE: Convergence criterion (GCONV=1E-8) satisfied.
+NOTE: There were 198 observations read from the data set WORK.BASELINE.
+NOTE: PROCEDURE LOGISTIC used (Total process time):
+      real time           0.27 seconds
+```
+
+**What the log should say, and what to CHECK.** The first NOTE is the most important line on the page:
+`PROC LOGISTIC is modeling the probability that goal_met='1'`. **Read it every time** — it confirms you are
+modeling the level you intended. Had you omitted `event='1'`, that line would read `goal_met='0'`, and every
+odds ratio below would be the reciprocal of what you wanted, with **no error to warn you**. The second
+load-bearing line is `198 observations read`: the visit-1 baseline slice has one row per screened participant
+(n = 198), so the count check is the same row-count discipline as every other week. `Convergence criterion ...
+satisfied` confirms the fit actually converged; a `WARNING: ... did not converge` or a quasi-complete
+separation note would mean the estimates are not trustworthy. No WARNING and no ERROR appear, so the model
+parsed and ran.
+
+### Reading the odds-ratio table (and the C-statistic)
+
+PROC LOGISTIC prints a response profile, a convergence note, the parameter estimates on the log-odds scale,
+and then the **odds-ratio estimates** with confidence intervals — the table you actually report. It also
+prints association statistics including the **C-statistic**.
+
+```text
+Output (synthetic, not executed)
+
+                Response Profile
+ Ordered                          Total
+   Value     goal_met         Frequency
+       1            1                82
+       2            0               116
+
+Probability modeled is goal_met='1'.
+
+           Odds Ratio Estimates
+                          Point        95% Wald
+Effect                 Estimate    Confidence Limits
+arm coaching vs usual     1.780      1.280     2.470
+age                       0.980      0.962     0.999
+baseline_bmi              0.930      0.892     0.970
+
+  Association of Predicted Probabilities and Observed Responses
+Percent Concordant   68.9      Somers' D   0.379
+Percent Discordant   31.1      Gamma       0.379
+                               c           0.690
+```
+
+**Interpretation, with the workflow move named.** Read the odds-ratio table line by line. The **arm** odds
+ratio is $1.78$ with a 95% confidence interval of $(1.28, 2.47)$: the odds of meeting the step goal are about
+$1.78$ times as high for the **coaching** arm as for **usual care**, and because the interval lies entirely
+above $1$ (and $p = 0.0006$ in the estimates table), the association is distinguishable from "no difference"
+in this synthetic sample. The **age** OR is $0.98$ and the **baseline_bmi** OR is $0.93$, both just below $1$,
+so in this model the odds of meeting goal edge **down** slightly with each additional year of age and each
+additional BMI point, holding the others fixed. The **C-statistic** is $0.690$: given a random
+goal-met case and a random not-met case, the model assigns the goal-met case a higher predicted probability
+about $69\%$ of the time — moderate discrimination, well above the $0.5$ of a coin flip but far from a perfect
+$1.0$. The workflow move is *confirm the modeled level from the response profile, read each OR with its CI and
+direction, then read the C-statistic for how well the model ranks* — and a $0.69$ AUC is honest, modest
+discrimination, not a strong classifier.
+
+### Saying it correctly: OR is not RR, and observational is not causal
+
+The odds-ratio table is where careful interpretation earns its keep, because two true things about it are
+constantly mis-stated. First, an **odds ratio is not a risk ratio**. The OR of $1.78$ compares the *odds*
+$p/(1-p)$, not the probabilities themselves. It is *not* "coaching participants are $78\%$ more likely to meet
+goal" — that sentence describes a **risk** (probability) ratio, which the OR only approximates when the event
+is rare, and meeting goal here (about $41\%$) is **not** rare. The correct sentence keeps the word *odds*:
+"the **odds** of meeting goal are about $1.78$ times as high under coaching." Second, the wellness data are
+**observational** — the arms are not described as randomized — so the arm OR is an **association**, not the
+causal effect of coaching. People in the coaching arm may differ systematically from those in usual care in
+ways the model does not capture, so the analysis shows that coaching is *associated* with higher odds of
+meeting goal in this synthetic sample, not that assigning someone to coaching *would* raise their odds. Both
+cautions are not footnotes; they are the load-bearing claims of the week, and the model is only as honest as
+the sentence you write under it.
+
+## Worked examples
+
+### Worked example — the wellness-program study: goal_met on arm, age, and BMI
+
+**The task.** Using the RiverCity wellness-program visit-1 baseline slice (one row per screened participant,
+n = 198), model the binary outcome `goal_met(event='1')` on `arm`, `age`, and `baseline_bmi`; read the odds
+ratios and the C-statistic; and verify the modeled level and the row count. The data are **synthetic; seed
+set, `streaminit(20260824)`**, and **observational** — no one is described as randomized to an arm.
+
+**The code.**
+
+```sas
+proc logistic data=work.baseline;
+    class arm (ref='usual_care') / param=ref;
+    model goal_met(event='1') = arm age baseline_bmi;
+run;
+```
+
+**The synthetic output** (the locked odds ratios, confidence intervals, and C-statistic):
+
+```text
+Output (synthetic, not executed)
+
+Number of Observations Read         198
+Number of Observations Used         198
+
+                Response Profile
+ Ordered                          Total
+   Value     goal_met         Frequency
+       1            1                82
+       2            0               116
+
+Probability modeled is goal_met='1'.
+
+NOTE: Convergence criterion (GCONV=1E-8) satisfied.
+
+         Analysis of Maximum Likelihood Estimates
+                       Standard       Wald
+Parameter   DF  Estimate   Error  Chi-Square  Pr > ChiSq
+Intercept    1    1.6240  0.9100      3.1850      0.0743
+arm coach    1    0.5766  0.1670     11.9200      0.0006
+age          1   -0.0202  0.0098      4.2500      0.0392
+baseline_bmi 1   -0.0726  0.0210     11.9500      0.0005
+
+           Odds Ratio Estimates
+                          Point        95% Wald
+Effect                 Estimate    Confidence Limits
+arm coaching vs usual     1.780      1.280     2.470
+age                       0.980      0.962     0.999
+baseline_bmi              0.930      0.892     0.970
+
+  Association of Predicted Probabilities and Observed Responses
+Percent Concordant   68.9      c           0.690
+```
+
+**The verification check.** Four moves. (1) `Number of Observations Read = 198` and `Used = 198` **match**, so
+no rows were dropped for missing predictors — the fit used the full baseline slice. (2) The response profile
+shows the outcome split, $82$ events ($goal\_met = 1$) and $116$ non-events, and the line
+`Probability modeled is goal_met='1'` **confirms the modeled level is the one you intended** — the single most
+important verification of the week. (3) The outcome is **numeric** 0/1 and the predictor `arm` is character
+with `usual_care` set as the reference, so the OR reads "coaching vs usual_care"; a quick `proc freq;
+tables goal_met arm;` before the fit would confirm the levels and counts. (4) An `NMISS` check on the outcome
+and predictors returns $0$, confirming complete cases. With those passing, the table is trustworthy *as a fit*
+— separate from whether the odds ratio is *interpreted* correctly, which the sentence you write decides.
+
+**The interpretation.** On the visit-1 slice, the odds of meeting the step goal are about **$1.78$ times as
+high under coaching as under usual care** (95% CI $1.28$–$2.47$, $p = 0.0006$) — the confidence interval lies
+entirely above $1$, so the association is distinguishable from no difference here. The `age` OR ($0.98$) and
+`baseline_bmi` OR ($0.93$) are just below $1$, so the modeled odds of meeting goal slip slightly with higher
+age and BMI, holding the others fixed. The C-statistic of $0.69$ says the model discriminates moderately. Now
+the two cautions, said correctly: this is an **odds** ratio, **not** a risk ratio — do **not** translate
+$1.78$ into "$78\%$ more likely to meet goal," because meeting goal (about $41\%$) is not rare and the OR
+overstates the probability ratio. And because the data are **observational** (the arms are not randomized),
+this is an **association** between coaching and higher goal-met odds in this synthetic sample, **not** evidence
+that assigning someone to coaching would raise their odds.
+
+### Worked example — transfer: modeling whether a visit was completed
+
+**The task.** A new yes/no question in a new context, still synthetic and still the wellness program. The
+`screenings` table records `completed` (`"Y"`/`"N"`) for each visit — did the participant complete that
+screening visit? Model the probability of a **completed** visit as a function of `steps_k` (thousands of steps
+that visit) and `visit_num`. Because `completed` is **character** `"Y"/"N"`, you point `event=` at the
+character level. This is a different table, a different outcome, and a different predictor, so the numbers
+below are a **notional transfer illustration**, not the locked study figures — they are invented for this
+example and carry the same `verified: false` caveat.
+
+**The code.**
+
+```sas
+proc logistic data=work.screenings;
+    class visit_num / param=ref ref=first;
+    model completed(event='Y') = steps_k visit_num;
+run;
+```
+
+```text
+SAS log (synthetic)
+NOTE: PROC LOGISTIC is modeling the probability that completed='Y'.
+NOTE: Convergence criterion (GCONV=1E-8) satisfied.
+NOTE: There were 594 observations read from the data set WORK.SCREENINGS.
+```
+
+```text
+Output (synthetic, not executed)  -- notional transfer figures, not locked
+
+Number of Observations Read         594
+Number of Observations Used         594
+
+Probability modeled is completed='Y'.
+
+           Odds Ratio Estimates
+                          Point        95% Wald
+Effect                 Estimate    Confidence Limits
+steps_k                   1.240      1.130     1.360
+visit_num 2 vs 1          0.880      0.610     1.270
+visit_num 3 vs 1          0.760      0.520     1.110
+
+  Association of Predicted Probabilities and Observed Responses
+c           0.660
+```
+
+**The verification check.** The log's first NOTE, `modeling the probability that completed='Y'`, confirms the
+event level is the **character** `"Y"` you intended — the same modeled-level check, now on a character
+outcome. `Read = 594` and `Used = 594` match, which is the **screening-row** grain (594 visit rows, not the
+200-participant or 198-baseline grain) — a deliberate reminder to know *which table and which grain* you are
+modeling. A `proc freq; tables completed visit_num;` before the fit would confirm the `"Y"/"N"` split and the
+three visit levels. (The odds ratios and C-statistic here are the notional, non-locked numbers.)
+
+**The interpretation.** On these notional figures, each additional thousand steps in a visit is associated
+with about $1.24$ times the **odds** of completing that visit (95% CI $1.13$–$1.36$) — again **odds**, not
+risk. The `visit_num` odds ratios compare visits 2 and 3 to visit 1 (the reference), and both confidence
+intervals include $1$, so the model does not distinguish completion odds across visits here. The transfer
+lesson is the same workflow shape on a character outcome: **declare the event level**, read it back off the
+log, confirm the row count *at the right grain*, read each odds ratio with its CI and the word *odds*, and —
+because these are observational screening data — keep every claim **associational**.
+
+## A common mistake
+
+The week's central trap is **mis-stating the odds ratio** — calling it a risk, inverting it, or reading it as
+causal. Five specific slips to avoid:
+
+- *Calling an odds ratio a risk ratio.* OR $= 1.78$ means the **odds** are $1.78$ times as high, **not** that
+  coaching participants are "$78\%$ more likely" to meet goal. That phrasing describes a risk (probability)
+  ratio, which the OR only approximates when the event is rare — and meeting goal (about $41\%$) is not rare.
+  Keep the word *odds*.
+- *Forgetting `event='1'` and inverting every OR.* Omit the `event=` option and SAS models the *other* level
+  by default, so each odds ratio prints as its reciprocal — with **no error**. Always read the
+  `Probability modeled is ...` line off the log to confirm the level before you report a single number.
+- *Ignoring the reference level.* The arm OR is "coaching **vs usual_care**" only because `usual_care` is the
+  reference. Change the reference and the comparison — and the number — change. State the reference level when
+  you state the odds ratio.
+- *Treating observational data as causal.* The arms are not described as randomized, so OR $= 1.78$ is an
+  **association** between coaching and higher goal-met odds, not the causal effect of coaching. The model
+  cannot say that assigning someone to coaching would raise their odds.
+- *Reading the C-statistic as accuracy.* AUC $= 0.69$ summarizes how well the model **ranks** an event case
+  above a non-event case; it is not "$69\%$ correct," and a model can rank well yet have poorly calibrated
+  probabilities. Report it as discrimination, not accuracy.
+
+A sixth, quieter slip is **putting a 0/1 outcome into PROC REG**. REG will happily fit a line to `goal_met`
+and print a slope, but that "linear probability model" can predict values outside $[0,1]$ and violates the
+constant-variance assumption — match the **procedure to the outcome type**, and a binary outcome takes
+LOGISTIC.
+
+## Low-stakes self-checks (ungraded)
+
+These are for self-study only — ungraded, no submission.
+
+1. Write the PROC LOGISTIC step that models `goal_met(event='1')` on `arm`, `age`, and `baseline_bmi` with
+   `usual_care` as the reference level. Which option declares the modeled event, and which sets the reference?
+2. From the locked output, state in one sentence each what the arm OR $1.78$ (CI $1.28$–$2.47$), the age OR
+   $0.98$, the BMI OR $0.93$, and the C-statistic $0.69$ tell you — and what each does **not** tell you.
+3. The log shows `PROC LOGISTIC is modeling the probability that goal_met='1'`. Why do you read this line every
+   time, and what would change in the odds ratios if it instead said `goal_met='0'`?
+4. A classmate reports "coaching participants are $78\%$ more likely to meet their goal." Identify the mistake
+   using this week's vocabulary, and rewrite the sentence so it correctly describes the **odds** ratio.
+5. The data are observational. Rewrite "coaching causes participants to meet their goal" as a correct
+   associational claim about the arm odds ratio, and say in one sentence why the causal version is not
+   supported.
+6. You have a binary outcome and you fit it with PROC REG instead of PROC LOGISTIC. Name two problems with the
+   resulting "linear probability" fit, and name the procedure you should have used.
+
+## Reading and source pointer
+
+For the SAS syntax, the reading pointer is the **SAS documentation for PROC LOGISTIC** — the `MODEL`
+statement and the **`event=` option** that declares the modeled level, the **`CLASS` statement** and
+reference coding (`param=ref`, `ref=`) that set a categorical predictor's reference level, the **odds-ratio
+estimates** table, and the **ROC / C-statistic** output for the model's discrimination. Consult these on
+[documentation.sas.com](https://documentation.sas.com) for the exact option names and the output objects; read
+them for *what the options do*, in the course's own words, not to copy their examples or listings. For the
+**statistical background** — what log-odds and odds ratios mean, why an OR is not a risk ratio, and why
+observational coefficients are associations — see the **logistic-regression chapter of *Introduction to Modern
+Statistics* (IMS), 2nd ed. (Çetinkaya-Rundel & Hardin), CC BY-SA 3.0**, free at
+[openintro-ims.netlify.app](https://openintro-ims.netlify.app); it calibrates the interpretation level, not
+the SAS syntax. These notes are the course's own synthesis: grounded in the SAS documentation and open
+statistics references, but not copied from them. SAS® and all SAS Institute product names are the property of
+SAS Institute Inc.
+
+## Verification & reproducibility status
+
+**verified: false.** The SAS code, the log excerpts, and every numeric value on this page are
+**hand-authored, synthetic, and were NOT run** — SAS is proprietary and is not executed in this build
+environment. The course **SAS execution/output gate is BLOCKED**: a rendered, syntax-highlighted code block or
+a typed listing is **not** evidence that the program runs or that the numbers are right. The load-bearing
+values here — the arm (coaching vs usual_care) odds ratio $1.78$ with 95% CI $(1.28, 2.47)$ and $p = 0.0006$;
+the `age` OR $0.98$ and `baseline_bmi` OR $0.93$; the C-statistic (AUC) $0.69$; the modeled level
+`goal_met='1'`; the response-profile counts ($82$ events / $116$ non-events); the n = 198 baseline row count;
+and the transfer figures for `completed='Y'` on the 594-row screening slice (which are notional, not locked) —
+are drafted "as if run" for this draft site and are synthetic (the `wellness-program study`, seed
+`streaminit(20260824)`), representing no real health data, with the analysis **observational** (the arm odds
+ratio is an association, not a causal effect, and an odds ratio is not a risk ratio). Do not treat any value
+here as a confirmed reference until the human/SAS-run sign-off in the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
+
+## Looking ahead
+
+Next week the focus shifts from fitting a model to **shaping the data that feeds one**. Week 12 covers
+**reshaping and merging**: PROC TRANSPOSE to move between wide and long layouts, and the DATA step `MERGE`
+(versus a PROC SQL join) to combine tables by a key — with the recurring `594` screening-row count as the
+validation target and the many-to-many merge as the trap to avoid. The discipline carries straight over: sort
+before you merge, use `IN=` flags to catch unmatched keys, and **check the row count after every join**,
+because a logistic or linear model is only as trustworthy as the analysis-ready table it was handed.
+
+## See also
+
+- Previous week: [Week 10 — Linear regression](week-10-linear-regression.qmd) — regression when the outcome is
+  continuous; this week is the same modeling idea for a binary outcome.
+- Next week: [Week 12 — Reshaping and merging data](week-12-reshaping-and-merging.qmd) — building the
+  analysis-ready table a model is fit on.
+- Earlier: [Week 9 — t-tests, ANOVA & group comparisons](week-09-ttests-anova-group-comparisons.qmd) — the
+  group-comparison procedures that precede regression.
+- [PROC reference](../resources/proc-reference.qmd) — REG, GLM, TTEST, LOGISTIC side by side.
+- [Log and verification guide](../resources/log-and-verification-guide.qmd) — reading NOTE/WARNING/ERROR and
+  checking counts.
+- [SAS workflow glossary](../resources/sas-workflow-glossary.qmd) — library, dataset, variable, format, and
+  the verification vocabulary.

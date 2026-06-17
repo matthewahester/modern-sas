@@ -1,0 +1,124 @@
+---
+title: "Schedule (workflow flow)"
+subtitle: "A 15-week pacing plan — Blackboard is authoritative for dates and deadlines"
+verified: false
+toc: true
+---
+
+::: {.callout-important}
+This is a **pacing plan, not a calendar**. It shows the order in which the SAS analytics workflow unfolds —
+from the environment, through building and validating data, into summaries and statistical procedures, and on
+to simulation and reproducible reporting — and roughly when, so you can read ahead and see where you are
+headed. It is **not** the authoritative calendar: exact dates, deadlines, submission windows, and any
+mid-term adjustments live in **Blackboard (the LMS)**, which is authoritative. A few fixed semester dates are
+noted for orientation only — confirm everything against Blackboard.
+:::
+
+The course runs fifteen weeks in four parts. Each part below lists its weeks, the theme for each week, and the
+**throughline** — the workflow move that carries the week, in the spirit of the recurring question *"would
+someone else be able to understand, rerun, and verify this?"* The **theme** links to that week's note. The
+single recurring teaching dataset is the synthetic, observational `wellness-program study` ("RiverCity
+Wellness"); it is **synthetic; seed set (`streaminit(20260824)`)** and is **not real health data**.
+
+::: {.callout-warning}
+**Nothing on this site was run in SAS.** SAS is proprietary and is **not executed** in this build, so every
+SAS program, log excerpt, and PROC output table you will meet in the weekly notes is **hand-authored and
+synthetic** (`verified: false`). A rendered, syntax-highlighted listing is not evidence that the code runs or
+that the numbers are right. See each page's **Verification & reproducibility status** section, and the
+the course's private notation and verification ledger §5 for the pending human/SAS-run sign-off.
+:::
+
+## Part I — The SAS analytics environment (Weeks 1–3)
+
+We set up the frame: what SAS is for as a professional analytics environment, how to open a project and write
+a first program, and how libraries, datasets, variables, and formats organize the data you will analyze.
+
+| Week | Theme | The throughline |
+|------|-------|-----------------|
+| 1 | [What SAS is for now](notes/week-01-what-sas-is-for-now.qmd) | What does a professional SAS analytics workflow look like — from messy data to a documented, rerunnable result — and what does the log tell you? |
+| 2 | [SAS environment & project setup](notes/week-02-sas-environment-and-project-setup.qmd) | How do you open SAS Studio, point a `libname` at your data, and run a first program so the log and output are reproducible? |
+| 3 | [Libraries, datasets, variables & formats](notes/week-03-libraries-datasets-variables-formats.qmd) | How are libraries, datasets, variable attributes, and the format-vs-informat distinction the vocabulary the rest of the workflow rests on? |
+
+*Note: **Labor Day (Mon, Sep 7)** falls in Week 3 — no class that Monday, so the week runs Wednesday and
+Friday (compressed).*
+
+## Part II — Building & validating data (Weeks 4–6)
+
+We move from messy input to analysis-ready, trustworthy tables: DATA step logic, importing and cleaning, and
+joining two related tables — always reading the log and checking the row counts before we trust anything.
+
+| Week | Theme | The throughline |
+|------|-------|-----------------|
+| 4 | [DATA step logic](notes/week-04-data-step-logic.qmd) | How does the DATA step let you create, clean, and subset data — handling the `age = 199` typo, missing values, and IF/THEN logic — and what does the log confirm? |
+| 5 | [Importing, cleaning & validating](notes/week-05-importing-cleaning-validating.qmd) | How do you import 210 raw rows, validate them down to 200 clean participants, and verify type problems and row counts rather than trusting the output? |
+| 6 | [PROC SQL & joins](notes/week-06-proc-sql-and-joins.qmd) | When you join `participants` to `screenings`, why is an inner join 594 rows but a left join 596 — and why must you check the row count after every join? |
+
+## Part III — Summaries, output & statistical procedures (Weeks 7–11)
+
+We summarize and report, then run the core statistical procedures — t-tests, ANOVA, regression, logistic
+regression — always stating assumptions and naming what the result does and does **not** show.
+
+| Week | Theme | The throughline |
+|------|-------|-----------------|
+| 7 | [Summaries, tables (+ midterm)](notes/week-07-summaries-tables-and-midterm.qmd) | How do PROC MEANS, FREQ, and UNIVARIATE summarize the study — and why is the mean of a 0/1 variable a proportion? |
+| 8 | [Visualization & ODS output](notes/week-08-visualization-and-ods-output.qmd) | How do SGPLOT and the ODS destinations turn an analysis into report-ready, text-described graphs and tables? |
+| 9 | [t-tests, ANOVA & group comparisons](notes/week-09-ttests-anova-group-comparisons.qmd) | How do PROC TTEST (`systolic_bp` by `arm`) and PROC GLM (by `site`) compare groups — and which assumptions must hold first? |
+| 10 | [Linear regression](notes/week-10-linear-regression.qmd) | How does PROC REG model `systolic_bp` from `age` and `baseline_bmi`, and what do $R^2$, RMSE, and the residual checks tell you? |
+| 11 | [Logistic regression & categorical outcomes](notes/week-11-logistic-regression-categorical.qmd) | How does PROC LOGISTIC model whether a participant met goal, which level is the event, and why is an odds ratio not a risk ratio? |
+
+*Note: the **midterm practical is Friday, Oct 9** (in class), during Week 7. It covers the SAS environment,
+project setup, libraries, datasets, variable attributes, the DATA step, importing, cleaning, validation, PROC
+SQL, summaries, and reporting. No graded content appears on this public site — see Blackboard.*
+
+## Part IV — Shaping, simulation & reproducible reporting (Weeks 12–15)
+
+We reshape and merge data, use simulation to study how procedures behave, then assemble the whole pipeline as
+one reproducible, verifiable analysis report and review the entire workflow.
+
+| Week | Theme | The throughline |
+|------|-------|-----------------|
+| 12 | [Reshaping & merging data](notes/week-12-reshaping-and-merging.qmd) | How do PROC TRANSPOSE (wide↔long) and a keyed MERGE reshape and combine data without silently creating a many-to-many bug? |
+| 13 | [Simulation & random generation](notes/week-13-simulation-and-random-generation.qmd) | With `streaminit(20260824)` and RAND, how do you simulate datasets to study power (≈ 0.99), Type I error (≈ 0.05), and a sampling distribution? |
+| 14 | [Reproducible SAS analysis report](notes/week-14-reproducible-sas-analysis-report.qmd) | How do you assemble the full pipeline — question → analysis-ready data → procedures → output → verification — as one program another person could rerun? |
+| 15 | [Final analytics project & review](notes/week-15-final-analytics-project-and-review.qmd) | How do the import, validation, summary, procedure, simulation, and reporting steps fit together as one reliable, traceable analytic practice? |
+
+*Note: **fall break is Nov 22–28** (no classes), between Weeks 13 and 14. The **last class is Mon, Dec 7**,
+the **consultation day is Dec 8**, and the **final-exam window is Dec 9–15** (exact block via Blackboard).*
+
+## How the week rhythm works
+
+Each week follows the same three-day rhythm so the workflow habit becomes automatic:
+
+- **Monday** — concept + syntax: the week's idea and the SAS code that carries it.
+- **Wednesday** — build + debug: read the log, debug the code, inspect the output.
+- **Friday** — skill check + applied analytics task: put the move to work on a new slice of the study.
+
+The discipline underneath every week is the same: **read the log** (NOTE / WARNING / ERROR), **check the row
+counts** after a join, **confirm variable types**, **check `NMISS`**, and **validate before you trust output**.
+Remember that the `wellness-program study` is synthetic and observational — a result is not a real health
+finding, the arm difference is associational (the synthetic arms are not described as randomized), an odds
+ratio is not a risk ratio, and "statistically significant" is not "practically important."
+
+::: {.callout-note}
+Again: this page is a pacing plan to help you read ahead. For the real calendar — every date, every deadline,
+every submission window, and any adjustment during the term — **Blackboard (the LMS) is authoritative**.
+:::
+
+## Verification & reproducibility status
+
+**`verified: false`.** This is a shell pacing page and carries no executed analysis. The weekly notes it links
+to contain SAS code, log excerpts, and numeric results (means, t/F statistics, p-values, regression
+coefficients, odds ratios, and the simulation summaries) that are **hand-authored, synthetic, and were NOT
+run** — SAS is proprietary and is not executed in this build. The few quantities named on this page (the
+locked join counts **594** inner / **596** left, the simulation **power ≈ 0.99** and **Type I ≈ 0.05**) are
+the study's locked synthetic values, not confirmed results. The course **SAS execution/output gate is
+BLOCKED**; a rendered code block or typed listing is not evidence the code runs or the numbers are right. Do
+not treat any value as a confirmed reference until the human/SAS-run sign-off in
+the course's private notation and verification ledger §5 is complete.
+
+## Public vs. graded
+These notes, the SAS examples, and the practice here are **public and ungraded** — study material only. No
+graded prompts, answer keys, rubrics, point values, or due dates appear on this site. Graded SAS workflow
+checkpoints, skill checks, homework, analytics labs, the midterm practical, the final analytics project, and
+the final practical live in **Blackboard (the LMS)**, which is authoritative for due dates, submissions, and
+grades. If this page and Blackboard ever disagree, follow Blackboard.
