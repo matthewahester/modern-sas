@@ -27,6 +27,9 @@ project:
     - "!run_reports/"
     - "!accessibility/"
 
+  resources:
+    - assets/hero-web.webp
+    - assets/hero-web-800.webp
 website:
   title: "Modern SAS for Statistical Analytics"
   site-url: https://matthewhester.com/modern-sas/
