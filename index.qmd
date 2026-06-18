@@ -1,10 +1,15 @@
 ---
-title: "Modern SAS for Statistical Analytics"
-subtitle: "From messy data to documented, reproducible, verified results — the professional SAS workflow"
+pagetitle: "Modern SAS for Statistical Analytics"
 toc: false
 ---
 
-![](assets/hero.png){.course-hero-img fig-alt="Course identity hero for Modern SAS for Statistical Analytics — a banded green malachite crystal surrounded by SAS analytics-workflow graphics including an import-validate-analyze-report-decide pipeline, a DATA step example, a SAS project folder tree, a PROC MEANS table, and a PROC SGPLOT scatterplot, with the course title."}
+![](assets/hero-web.webp){.course-hero-img fig-alt="Course identity hero for Modern SAS for Statistical Analytics — a banded green malachite crystal surrounded by SAS analytics-workflow graphics including an import-validate-analyze-report-decide pipeline, a DATA step example, a SAS project folder tree, a PROC MEANS table, and a PROC SGPLOT scatterplot, with the course title."}
+
+# Modern SAS for Statistical Analytics {.course-landing-title}
+
+::: {.course-landing-subtitle}
+From messy data to documented, reproducible, verified results — the professional SAS workflow
+:::
 
 > SAS is not just a language for running procedures. It is a professional analytics **environment** — a place
 > to move data from raw and messy to clean, validated, analyzed, and reported, where reliability, traceability,
